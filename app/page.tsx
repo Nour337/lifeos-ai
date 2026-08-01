@@ -1,8 +1,14 @@
+
+import { supabase } from "@/lib/supabaseClient";
 import Image from "next/image";
 
 export default function Home() {
+  supabase.auth.getSession().then((res) => {
+    console.log("SUPABASE TEST:", res);
+  });
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      <div className="bg-blue-500 text-white p-4">Tailwind Test</div>
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
         <Image
           className="dark:invert"
