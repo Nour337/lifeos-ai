@@ -4,21 +4,20 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
+import { getTasks } from "@/lib/queries/tasks";
+import type { Task } from "@/types/task";
 
 export default function DashboardPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
-  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   useEffect(() => {
     if (user) {
-      supabase
-        .from("tasks")
-        .select("*")
-        .then(({ data, error }) => {
-          if (error) console.error(error);
-          setTaskCount(data?.length ?? 0);
-        });
+      getTasks().then((data) => {
+        console.log("Fetched tasks:", data);
+        setTasks(data);
+      });
     }
   }, [user]);
 
@@ -35,7 +34,7 @@ export default function DashboardPage() {
         Welcome, {user?.email ?? "Guest"}
       </h1>
       <p className="text-lg text-zinc-600 dark:text-zinc-400">
-        You have {taskCount === null ? "..." : taskCount} tasks visible to you.
+        You have {tasks.length} tasks visible to you.
       </p>
       <button
         onClick={handleLogout}
