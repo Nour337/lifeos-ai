@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import type { Task } from "@/types/task";
+import type { Task, TaskStatus } from "@/types/task";
 
 export async function getTasks(): Promise<Task[]> {
   const { data, error } = await supabase
@@ -20,6 +20,25 @@ export async function deleteTask(id: string): Promise<boolean> {
 
   if (error) {
     console.error("Error deleting task:", error.message);
+    return false;
+  }
+
+  return true;
+}
+
+export async function toggleTaskStatus(
+  id: string,
+  currentStatus: TaskStatus
+): Promise<boolean> {
+  const newStatus: TaskStatus = currentStatus === "done" ? "todo" : "done";
+
+  const { error } = await supabase
+    .from("tasks")
+    .update({ status: newStatus })
+    .eq("id", id);
+
+  if (error) {
+    console.error("Error toggling task status:", error.message);
     return false;
   }
 

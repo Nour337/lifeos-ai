@@ -16,10 +16,12 @@ export default function TaskList({
   tasks,
   onEditTask,
   onDeleteTask,
+  onToggleStatus,
 }: {
   tasks: Task[];
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
+  onToggleStatus: (task: Task) => void;
 }) {
   if (tasks.length === 0) {
     return (
@@ -36,17 +38,32 @@ export default function TaskList({
           key={task.id}
           className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
         >
-          <div
-            onClick={() => onEditTask(task)}
-            className="flex-1 cursor-pointer"
-          >
-            <p className="font-medium text-black dark:text-white">
-              {task.title}
-            </p>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {statusLabels[task.status] ?? task.status}
-              {task.due_date && ` · Due ${task.due_date}`}
-            </p>
+          <div className="flex flex-1 items-start gap-3">
+            <input
+              type="checkbox"
+              checked={task.status === "done"}
+              onChange={(e) => {
+                e.stopPropagation();
+                onToggleStatus(task);
+              }}
+              className="mt-1 h-5 w-5 cursor-pointer"
+            />
+            <div
+              onClick={() => onEditTask(task)}
+              className="flex-1 cursor-pointer"
+            >
+              <p
+                className={`font-medium text-black dark:text-white ${
+                  task.status === "done" ? "line-through opacity-50" : ""
+                }`}
+              >
+                {task.title}
+              </p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                {statusLabels[task.status] ?? task.status}
+                {task.due_date && ` · Due ${task.due_date}`}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
