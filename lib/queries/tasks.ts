@@ -44,3 +44,18 @@ export async function toggleTaskStatus(
 
   return true;
 }
+
+export async function getTasksByProject(projectId: string): Promise<Task[]> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching project tasks:", error.message);
+    return [];
+  }
+
+  return data as Task[];
+}

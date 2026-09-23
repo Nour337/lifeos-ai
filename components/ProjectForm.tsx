@@ -3,45 +3,35 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
-import { getProjects } from "@/lib/queries/projects";
 import { getGoals } from "@/lib/queries/goals";
-import type { Task, TaskPriority } from "@/types/task";
 import type { Project } from "@/types/project";
 import type { Goal } from "@/types/goal";
 
-type TaskFormProps = {
-  onTaskSaved: () => void;
-  editingTask?: Task | null;
+type ProjectFormProps = {
+  onProjectSaved: () => void;
+  editingProject?: Project | null;
   onCancelEdit?: () => void;
 };
 
-export default function TaskForm({
-  onTaskSaved,
-  editingTask,
+export default function ProjectForm({
+  onProjectSaved,
+  editingProject,
   onCancelEdit,
-}: TaskFormProps) {
+}: ProjectFormProps) {
   const { user } = useAuth();
-  // Initial values come from editingTask; the parent passes a `key` so the
-  // form remounts (and re-reads these) whenever a different task is edited.
-  const [title, setTitle] = useState(editingTask?.title ?? "");
+  // Initial values come from editingProject; the parent remounts the form via `key`
+  const [name, setName] = useState(editingProject?.name ?? "");
   const [description, setDescription] = useState(
-    editingTask?.description ?? ""
+    editingProject?.description ?? ""
   );
-  const [priority, setPriority] = useState<TaskPriority>(
-    editingTask?.priority ?? "medium"
-  );
-  const [dueDate, setDueDate] = useState(editingTask?.due_date ?? "");
-  const [projectId, setProjectId] = useState(editingTask?.project_id ?? "");
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [goalId, setGoalId] = useState(editingTask?.goal_id ?? "");
+  const [deadline, setDeadline] = useState(editingProject?.deadline ?? "");
+  const [goalId, setGoalId] = useState(editingProject?.goal_id ?? "");
   const [goals, setGoals] = useState<Goal[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Load the user's projects and goals once, to populate the dropdowns
   useEffect(() => {
     if (user) {
-      getProjects().then(setProjects);
       getGoals().then(setGoals);
     }
   }, [user]);
@@ -53,26 +43,23 @@ export default function TaskForm({
     setSaving(true);
     setError("");
 
-    const taskData = {
-      title,
+    const projectData = {
+      name,
       description: description || null,
-      priority,
-      due_date: dueDate || null,
-      project_id: projectId || null,
+      deadline: deadline || null,
       goal_id: goalId || null,
     };
 
     let result;
-    if (editingTask) {
+    if (editingProject) {
       result = await supabase
-        .from("tasks")
-        .update(taskData)
-        .eq("id", editingTask.id);
+        .from("projects")
+        .update(projectData)
+        .eq("id", editingProject.id);
     } else {
-      result = await supabase.from("tasks").insert({
+      result = await supabase.from("projects").insert({
         user_id: user.id,
-        status: "todo",
-        ...taskData,
+        ...projectData,
       });
     }
 
@@ -83,13 +70,11 @@ export default function TaskForm({
       return;
     }
 
-    setTitle("");
+    setName("");
     setDescription("");
-    setPriority("medium");
-    setDueDate("");
-    setProjectId("");
+    setDeadline("");
     setGoalId("");
-    onTaskSaved();
+    onProjectSaved();
   };
 
   return (
@@ -99,9 +84,9 @@ export default function TaskForm({
     >
       <input
         type="text"
-        placeholder="Task title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Project name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
         required
         className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
       />
@@ -112,33 +97,12 @@ export default function TaskForm({
         className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
       />
       <div className="flex flex-wrap gap-3">
-        <select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
         <input
           type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
+          value={deadline}
+          onChange={(e) => setDeadline(e.target.value)}
           className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
         />
-        <select
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="">No project</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
         <select
           value={goalId}
           onChange={(e) => setGoalId(e.target.value)}
@@ -159,9 +123,9 @@ export default function TaskForm({
           disabled={saving}
           className="rounded-md bg-black px-4 py-2 text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
-          {saving ? "Saving..." : editingTask ? "Update Task" : "Add Task"}
+          {saving ? "Saving..." : editingProject ? "Update Project" : "Add Project"}
         </button>
-        {editingTask && onCancelEdit && (
+        {editingProject && onCancelEdit && (
           <button
             type="button"
             onClick={onCancelEdit}
