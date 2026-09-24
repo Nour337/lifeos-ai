@@ -12,6 +12,39 @@ export function addDays(dateString: string, days: number): string {
   return toLocalDateString(new Date(year, month - 1, day + days));
 }
 
+function addMonths(dateString: string, months: number): string {
+  const [year, month, day] = dateString.split("-").map(Number);
+  // Clamp to the last day of the target month (Jan 31 + 1 month = Feb 28/29)
+  const lastDay = new Date(year, month - 1 + months + 1, 0).getDate();
+  return toLocalDateString(
+    new Date(year, month - 1 + months, Math.min(day, lastDay))
+  );
+}
+
+// Next due date for a repeating task, never earlier than today.
+export function nextOccurrence(
+  from: string,
+  repeat: "daily" | "weekly" | "monthly",
+  today: string
+): string {
+  const step = (date: string) =>
+    repeat === "daily"
+      ? addDays(date, 1)
+      : repeat === "weekly"
+        ? addDays(date, 7)
+        : addMonths(date, 1);
+  let next = step(from);
+  while (next < today) next = step(next);
+  return next;
+}
+
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
 export function formatDate(dateString: string): string {
   const [year, month, day] = dateString.split("-").map(Number);
   return new Date(year, month - 1, day).toLocaleDateString(undefined, {

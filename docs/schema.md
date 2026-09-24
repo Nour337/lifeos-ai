@@ -51,7 +51,19 @@ Project   Task (optional direct link)
 | category           | text      |                             |
 | project_id         | uuid, nullable | FK -> projects.id      |
 | goal_id            | uuid, nullable | FK -> goals.id (direct link, bypasses project) |
+| repeat             | text, nullable | daily / weekly / monthly; completing moves due_date forward |
 | created_at         | timestamp |                             |
+
+### ai_usage
+| Column  | Type | Notes                                    |
+|---------|------|-------------------------------------------|
+| user_id | uuid | FK -> auth.users, part of primary key     |
+| day     | date | UTC day, part of primary key              |
+| count   | int  | AI questions used that day                |
+
+Users can only read their row. `consume_ai_credit()` (security definer)
+is the only writer and enforces the daily limit of 10.
+See `supabase/migrations/`.
 
 ## Key Decision Log
 - Deviated from roadmap: used `projects.goal_id` instead of

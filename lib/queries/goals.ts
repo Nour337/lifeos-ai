@@ -9,7 +9,7 @@ export async function getGoals(): Promise<Goal[]> {
 
   if (error) {
     console.error("Error fetching goals:", error.message);
-    return [];
+    throw new Error("Couldn't load your goals.");
   }
 
   return data as Goal[];
@@ -20,11 +20,12 @@ export async function getGoalById(id: string): Promise<Goal | null> {
     .from("goals")
     .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
+  // No row = not found (null); a real error should surface as an error
   if (error) {
     console.error("Error fetching goal:", error.message);
-    return null;
+    throw new Error("Couldn't load this goal.");
   }
 
   return data as Goal;

@@ -2,12 +2,20 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/AuthContext";
-import { getTasks, deleteTask, toggleTaskStatus } from "@/lib/queries/tasks";
+import { getTasks } from "@/lib/queries/tasks";
 import { getProjects } from "@/lib/queries/projects";
+import { useTaskActions } from "@/lib/useTaskActions";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import TaskFilters, { type TaskFilterState } from "@/components/TaskFilters";
-import { Button, EmptyState, ListSkeleton, Modal, PageHeader } from "@/components/ui";
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  ListSkeleton,
+  Modal,
+  PageHeader,
+} from "@/components/ui";
 import { ChecklistIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import type { Task } from "@/types/task";
 
@@ -25,28 +33,42 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   // null = closed, { task: null } = new task, { task } = editing
   const [form, setForm] = useState<{ task: Task | null } | null>(null);
   const [filters, setFilters] = useState<TaskFilterState>({
     status: "all",
     priority: "all",
+    category: "all",
     search: "",
   });
 
   const refreshTasks = useCallback(() => {
-    getTasks().then((data) => {
-      setTasks(data);
-      setLoaded(true);
-    });
+    getTasks()
+      .then((data) => {
+        setTasks(data);
+        setLoadError("");
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoaded(true));
+    getProjects()
+      .then((projects) =>
+        setProjectNames(Object.fromEntries(projects.map((p) => [p.id, p.name])))
+      )
+      .catch(() => {}); // project names are optional decoration
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-    refreshTasks();
-    getProjects().then((projects) =>
-      setProjectNames(Object.fromEntries(projects.map((p) => [p.id, p.name])))
-    );
+    if (user) refreshTasks();
   }, [user, refreshTasks]);
+
+  const { toggle, remove } = useTaskActions(setTasks, refreshTasks);
+
+  const categories = useMemo(
+    () =>
+      [...new Set(tasks.map((t) => t.category).filter((c): c is string => !!c))].sort(),
+    [tasks]
+  );
 
   const filteredTasks = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
@@ -56,11 +78,13 @@ export default function TasksPage() {
           filters.status === "all" || task.status === filters.status;
         const priorityMatch =
           filters.priority === "all" || task.priority === filters.priority;
+        const categoryMatch =
+          filters.category === "all" || task.category === filters.category;
         const searchMatch =
           search === "" ||
           task.title.toLowerCase().includes(search) ||
           (task.description ?? "").toLowerCase().includes(search);
-        return statusMatch && priorityMatch && searchMatch;
+        return statusMatch && priorityMatch && categoryMatch && searchMatch;
       })
       .sort(sortTasks);
   }, [tasks, filters]);
@@ -72,29 +96,13 @@ export default function TasksPage() {
     refreshTasks();
   };
 
-  const handleDeleteTask = async (id: string) => {
-    if (await deleteTask(id)) refreshTasks();
-  };
-
-  const handleToggleStatus = async (task: Task) => {
-    // Update the UI immediately, then sync with the database
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === task.id
-          ? { ...t, status: task.status === "done" ? "todo" : "done" }
-          : t
-      )
-    );
-    if (!(await toggleTaskStatus(task.id, task.status))) refreshTasks();
-  };
-
   const openCount = tasks.filter((t) => t.status !== "done").length;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Tasks"
-        subtitle={loaded ? `${openCount} open` : undefined}
+        subtitle={loaded && !loadError ? `${openCount} open` : undefined}
         action={
           <Button onClick={() => setForm({ task: null })}>
             <PlusIcon className="h-4 w-4" />
@@ -103,10 +111,12 @@ export default function TasksPage() {
         }
       />
 
-      <TaskFilters filters={filters} onChange={setFilters} />
+      <TaskFilters filters={filters} categories={categories} onChange={setFilters} />
 
       {!loaded ? (
         <ListSkeleton rows={4} />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={refreshTasks} />
       ) : tasks.length === 0 ? (
         <EmptyState
           icon={<ChecklistIcon />}
@@ -130,8 +140,8 @@ export default function TasksPage() {
           tasks={filteredTasks}
           projectNames={projectNames}
           onEditTask={(task) => setForm({ task })}
-          onDeleteTask={handleDeleteTask}
-          onToggleStatus={handleToggleStatus}
+          onDeleteTask={remove}
+          onToggleStatus={toggle}
         />
       )}
 
@@ -143,6 +153,7 @@ export default function TasksPage() {
         {form && (
           <TaskForm
             editingTask={form.task}
+            categories={categories}
             onTaskSaved={handleTaskSaved}
             onCancel={closeForm}
           />

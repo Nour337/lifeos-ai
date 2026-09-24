@@ -8,7 +8,8 @@ import { getTasks } from "@/lib/queries/tasks";
 import { getGoalProgress, type Progress } from "@/lib/progress";
 import GoalList from "@/components/GoalList";
 import GoalForm from "@/components/GoalForm";
-import { Button, EmptyState, ListSkeleton, Modal, PageHeader } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { Button, EmptyState, ErrorState, ListSkeleton, Modal, PageHeader } from "@/components/ui";
 import { PlusIcon, TargetIcon } from "@/components/icons";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
@@ -20,18 +21,21 @@ export default function GoalsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const toast = useToast();
   // null = closed, { goal: null } = new, { goal } = editing
   const [form, setForm] = useState<{ goal: Goal | null } | null>(null);
 
   const refreshGoals = useCallback(() => {
-    Promise.all([getGoals(), getProjects(), getTasks()]).then(
-      ([goalData, projectData, taskData]) => {
+    Promise.all([getGoals(), getProjects(), getTasks()])
+      .then(([goalData, projectData, taskData]) => {
         setGoals(goalData);
         setProjects(projectData);
         setTasks(taskData);
-        setLoaded(true);
-      }
-    );
+        setLoadError("");
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -64,7 +68,12 @@ export default function GoalsPage() {
   };
 
   const handleDeleteGoal = async (id: string) => {
-    if (await deleteGoal(id)) refreshGoals();
+    if (await deleteGoal(id)) {
+      toast("Goal deleted. Its projects and tasks were kept.");
+    } else {
+      toast("Couldn't delete the goal. Try again.", { tone: "error" });
+    }
+    refreshGoals();
   };
 
   return (
@@ -82,6 +91,8 @@ export default function GoalsPage() {
 
       {!loaded ? (
         <ListSkeleton rows={2} />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={refreshGoals} />
       ) : goals.length === 0 ? (
         <EmptyState
           icon={<TargetIcon />}

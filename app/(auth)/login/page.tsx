@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
@@ -69,6 +70,12 @@ export default function LoginPage() {
             />
           )}
         </Field>
+
+        <div className="-mt-2 text-right">
+          <Link href="/forgot-password" className="text-sm text-accent hover:underline">
+            Forgot password?
+          </Link>
+        </div>
 
         {message && (
           <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">

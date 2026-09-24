@@ -3,14 +3,13 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Spinner } from "@/components/ui";
 import {
   ChecklistIcon,
   FolderIcon,
   LogoMark,
-  LogoutIcon,
+  SettingsIcon,
   SunIcon,
   TargetIcon,
 } from "@/components/icons";
@@ -36,11 +35,6 @@ export default function DashboardLayout({
       router.push("/login");
     }
   }, [loading, user, router]);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
 
   if (loading || !user) {
     return (
@@ -79,14 +73,16 @@ export default function DashboardLayout({
             ))}
           </nav>
 
-          <button
-            onClick={handleLogout}
-            className="ml-auto flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted transition hover:bg-surface-2 hover:text-ink"
-            aria-label="Log out"
+          <Link
+            href="/settings"
+            className={`ml-auto flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition hover:bg-surface-2 hover:text-ink ${
+              isActive("/settings") ? "bg-surface-2 text-ink" : "text-muted"
+            }`}
+            aria-label="Settings"
           >
-            <LogoutIcon className="h-[18px] w-[18px]" />
-            <span className="hidden sm:inline">Log out</span>
-          </button>
+            <SettingsIcon className="h-[18px] w-[18px]" />
+            <span className="hidden sm:inline">Settings</span>
+          </Link>
         </div>
       </header>
 

@@ -155,6 +155,29 @@ export function EmptyState({
   );
 }
 
+export function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center rounded-2xl border border-danger/30 bg-danger-soft px-6 py-10 text-center"
+    >
+      <p className="font-medium text-danger">{message}</p>
+      <p className="mt-1 text-sm text-muted">
+        Check your internet connection. Your data is safe.
+      </p>
+      <Button variant="secondary" className="mt-4" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 export function Skeleton({ className = "" }: { className?: string }) {
   return (
     <div className={`animate-pulse rounded-lg bg-surface-2 ${className}`} />

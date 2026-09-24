@@ -1,7 +1,19 @@
 "use client";
 
-import { CalendarIcon, CheckIcon, FolderIcon, TrashIcon } from "@/components/icons";
-import { describeDue, toLocalDateString, type DueTone } from "@/utils/date";
+import {
+  CalendarIcon,
+  CheckIcon,
+  ClockIcon,
+  FolderIcon,
+  RepeatIcon,
+  TrashIcon,
+} from "@/components/icons";
+import {
+  describeDue,
+  formatDuration,
+  toLocalDateString,
+  type DueTone,
+} from "@/utils/date";
 import type { Task } from "@/types/task";
 
 const priorityStyles: Record<string, { dot: string; label: string }> = {
@@ -27,7 +39,7 @@ export default function TaskList({
   tasks: Task[];
   projectNames?: Record<string, string>;
   onEditTask: (task: Task) => void;
-  onDeleteTask: (id: string) => void;
+  onDeleteTask: (task: Task) => void;
   onToggleStatus: (task: Task) => void;
 }) {
   const today = toLocalDateString();
@@ -78,19 +90,34 @@ export default function TaskList({
                     {due.label}
                   </span>
                 )}
+                {task.repeat && (
+                  <span className="flex items-center gap-1 capitalize">
+                    <RepeatIcon className="h-3.5 w-3.5" />
+                    {task.repeat}
+                  </span>
+                )}
+                {task.estimated_duration && (
+                  <span className="flex items-center gap-1">
+                    <ClockIcon className="h-3.5 w-3.5" />
+                    {formatDuration(task.estimated_duration)}
+                  </span>
+                )}
                 {projectName && (
                   <span className="flex items-center gap-1">
                     <FolderIcon className="h-3.5 w-3.5" />
                     {projectName}
                   </span>
                 )}
+                {task.category && (
+                  <span className="rounded-full bg-surface-2 px-2 py-0.5">
+                    {task.category}
+                  </span>
+                )}
               </div>
             </button>
 
             <button
-              onClick={() => {
-                if (confirm(`Delete "${task.title}"?`)) onDeleteTask(task.id);
-              }}
+              onClick={() => onDeleteTask(task)}
               className="-mr-1 rounded-lg p-1.5 text-muted opacity-60 transition hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
               aria-label={`Delete "${task.title}"`}
             >

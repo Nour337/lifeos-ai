@@ -3,14 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
-import { getTasks, toggleTaskStatus } from "@/lib/queries/tasks";
+import { getTasks } from "@/lib/queries/tasks";
+import { useTaskActions } from "@/lib/useTaskActions";
 import { getGoals } from "@/lib/queries/goals";
 import { getProjects } from "@/lib/queries/projects";
 import { getDisplayName } from "@/lib/queries/profiles";
 import AIPanel from "@/components/AIPanel";
 import TaskForm from "@/components/TaskForm";
 import { TaskCheckbox } from "@/components/TaskList";
-import { Button, Card, Modal, SectionTitle, Skeleton } from "@/components/ui";
+import {
+  Button,
+  Card,
+  ErrorState,
+  Modal,
+  SectionTitle,
+  Skeleton,
+} from "@/components/ui";
 import {
   CalendarIcon,
   ChecklistIcon,
@@ -52,16 +60,20 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [now, setNow] = useState(() => new Date());
   const [formOpen, setFormOpen] = useState(false);
 
   const refresh = useCallback(() => {
-    Promise.all([getTasks(), getGoals(), getProjects()]).then(([t, g, p]) => {
-      setTasks(t);
-      setGoals(g);
-      setProjects(p);
-      setLoaded(true);
-    });
+    Promise.all([getTasks(), getGoals(), getProjects()])
+      .then(([t, g, p]) => {
+        setTasks(t);
+        setGoals(g);
+        setProjects(p);
+        setLoadError("");
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -145,17 +157,7 @@ export default function DashboardPage() {
     return items.sort((a, b) => a.date.localeCompare(b.date));
   }, [tasks, projects, goals, today]);
 
-  const handleToggle = async (task: Task) => {
-    // Update the UI immediately, then sync with the database
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === task.id
-          ? { ...t, status: task.status === "done" ? "todo" : "done" }
-          : t
-      )
-    );
-    if (!(await toggleTaskStatus(task.id, task.status))) refresh();
-  };
+  const { toggle: handleToggle } = useTaskActions(setTasks, refresh);
 
   const name = displayName ?? user?.email?.split("@")[0] ?? "there";
   const doneToday = todaysTasks.filter((t) => t.status === "done").length;
@@ -192,6 +194,8 @@ export default function DashboardPage() {
           <Skeleton className="h-28" />
           <Skeleton className="h-40" />
         </div>
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={refresh} />
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
@@ -232,7 +236,7 @@ export default function DashboardPage() {
             </section>
           )}
 
-          <AIPanel hasTasks={openCount > 0} />
+          <AIPanel tasks={tasks} onToggle={handleToggle} />
 
           <Card>
             <SectionTitle
@@ -301,6 +305,9 @@ export default function DashboardPage() {
       <Modal open={formOpen} title="New task" onClose={() => setFormOpen(false)}>
         {formOpen && (
           <TaskForm
+            categories={[
+              ...new Set(tasks.map((t) => t.category).filter((c): c is string => !!c)),
+            ]}
             onTaskSaved={() => {
               setFormOpen(false);
               refresh();

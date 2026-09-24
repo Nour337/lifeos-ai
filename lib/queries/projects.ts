@@ -9,7 +9,7 @@ export async function getProjects(): Promise<Project[]> {
 
   if (error) {
     console.error("Error fetching projects:", error.message);
-    return [];
+    throw new Error("Couldn't load your projects.");
   }
 
   return data as Project[];
@@ -31,11 +31,12 @@ export async function getProjectById(id: string): Promise<Project | null> {
     .from("projects")
     .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
+  // No row = not found (null); a real error should surface as an error
   if (error) {
     console.error("Error fetching project:", error.message);
-    return null;
+    throw new Error("Couldn't load this project.");
   }
 
   return data as Project;

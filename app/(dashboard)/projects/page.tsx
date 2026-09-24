@@ -8,7 +8,8 @@ import { getGoals } from "@/lib/queries/goals";
 import { getProjectProgress, type Progress } from "@/lib/progress";
 import ProjectList from "@/components/ProjectList";
 import ProjectForm from "@/components/ProjectForm";
-import { Button, EmptyState, Modal, PageHeader, Skeleton } from "@/components/ui";
+import { useToast } from "@/components/Toast";
+import { Button, EmptyState, ErrorState, Modal, PageHeader, Skeleton } from "@/components/ui";
 import { FolderIcon, PlusIcon } from "@/components/icons";
 import type { Project } from "@/types/project";
 import type { Task } from "@/types/task";
@@ -19,18 +20,21 @@ export default function ProjectsPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goalNames, setGoalNames] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const toast = useToast();
   // null = closed, { project: null } = new, { project } = editing
   const [form, setForm] = useState<{ project: Project | null } | null>(null);
 
   const refreshProjects = useCallback(() => {
-    Promise.all([getProjects(), getTasks(), getGoals()]).then(
-      ([projectData, taskData, goalData]) => {
+    Promise.all([getProjects(), getTasks(), getGoals()])
+      .then(([projectData, taskData, goalData]) => {
         setProjects(projectData);
         setTasks(taskData);
         setGoalNames(Object.fromEntries(goalData.map((g) => [g.id, g.name])));
-        setLoaded(true);
-      }
-    );
+        setLoadError("");
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -53,7 +57,13 @@ export default function ProjectsPage() {
   };
 
   const handleDeleteProject = async (id: string) => {
-    if (await deleteProject(id)) refreshProjects();
+    if (await deleteProject(id)) {
+      // Tasks in the project are kept, just no longer linked to it
+      toast("Project deleted. Its tasks were kept.");
+    } else {
+      toast("Couldn't delete the project. Try again.", { tone: "error" });
+    }
+    refreshProjects();
   };
 
   return (
@@ -74,6 +84,8 @@ export default function ProjectsPage() {
           <Skeleton className="h-32" />
           <Skeleton className="h-32" />
         </div>
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={refreshProjects} />
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<FolderIcon />}

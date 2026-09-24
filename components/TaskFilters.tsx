@@ -6,6 +6,7 @@ import { Select } from "@/components/ui";
 export type TaskFilterState = {
   status: string;
   priority: string;
+  category: string;
   search: string;
 };
 
@@ -18,9 +19,11 @@ const statusOptions = [
 
 export default function TaskFilters({
   filters,
+  categories = [],
   onChange,
 }: {
   filters: TaskFilterState;
+  categories?: string[];
   onChange: (filters: TaskFilterState) => void;
 }) {
   return (
@@ -47,6 +50,21 @@ export default function TaskFilters({
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </Select>
+        {categories.length > 0 && (
+          <Select
+            value={filters.category}
+            onChange={(e) => onChange({ ...filters, category: e.target.value })}
+            className="hidden w-auto! pr-8 sm:block"
+            aria-label="Filter by category"
+          >
+            <option value="all">Any category</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        )}
       </div>
 
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
@@ -63,6 +81,25 @@ export default function TaskFilters({
               }`}
             >
               {option.label}
+            </button>
+          );
+        })}
+        {/* On phones categories are chips in the same row */}
+        {categories.map((c) => {
+          const active = filters.category === c;
+          return (
+            <button
+              key={c}
+              onClick={() =>
+                onChange({ ...filters, category: active ? "all" : c })
+              }
+              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition sm:hidden ${
+                active
+                  ? "border-accent bg-accent-soft text-accent"
+                  : "border-dashed border-line text-muted"
+              }`}
+            >
+              {c}
             </button>
           );
         })}

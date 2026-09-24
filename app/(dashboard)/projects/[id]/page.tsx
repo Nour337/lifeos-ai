@@ -5,16 +5,21 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getProjectById } from "@/lib/queries/projects";
 import { getGoalById } from "@/lib/queries/goals";
-import {
-  getTasksByProject,
-  deleteTask,
-  toggleTaskStatus,
-} from "@/lib/queries/tasks";
+import { getTasksByProject } from "@/lib/queries/tasks";
+import { useTaskActions } from "@/lib/useTaskActions";
 import { computeProgress } from "@/lib/progress";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import ProgressBar from "@/components/ProgressBar";
-import { Button, Card, EmptyState, ListSkeleton, Modal, Skeleton } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  ListSkeleton,
+  Modal,
+  Skeleton,
+} from "@/components/ui";
 import {
   ArrowLeftIcon,
   CalendarIcon,
@@ -35,41 +40,40 @@ export default function ProjectDetailPage() {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [form, setForm] = useState<{ task: Task | null } | null>(null);
 
+  const load = useCallback(() => {
+    Promise.all([getProjectById(projectId), getTasksByProject(projectId)])
+      .then(async ([projectData, tasksData]) => {
+        setProject(projectData);
+        setTasks(tasksData);
+        setLoadError("");
+        if (projectData?.goal_id) {
+          setGoal(await getGoalById(projectData.goal_id).catch(() => null));
+        }
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
   const refreshTasks = useCallback(() => {
-    getTasksByProject(projectId).then(setTasks);
+    getTasksByProject(projectId)
+      .then(setTasks)
+      .catch((e: Error) => setLoadError(e.message));
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (projectId) load();
+  }, [projectId, load]);
 
-    Promise.all([
-      getProjectById(projectId),
-      getTasksByProject(projectId),
-    ]).then(async ([projectData, tasksData]) => {
-      setProject(projectData);
-      setTasks(tasksData);
-      if (projectData?.goal_id) {
-        setGoal(await getGoalById(projectData.goal_id));
-      }
-      setLoading(false);
-    });
-  }, [projectId]);
+  const { toggle, remove } = useTaskActions(setTasks, refreshTasks);
 
   const closeForm = useCallback(() => setForm(null), []);
 
   const handleTaskSaved = () => {
     setForm(null);
     refreshTasks();
-  };
-
-  const handleDeleteTask = async (id: string) => {
-    if (await deleteTask(id)) refreshTasks();
-  };
-
-  const handleToggleStatus = async (task: Task) => {
-    if (await toggleTaskStatus(task.id, task.status)) refreshTasks();
   };
 
   const backLink = (
@@ -88,6 +92,15 @@ export default function ProjectDetailPage() {
         {backLink}
         <Skeleton className="h-32" />
         <ListSkeleton rows={3} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-5">
+        {backLink}
+        <ErrorState message={loadError} onRetry={load} />
       </div>
     );
   }
@@ -161,8 +174,8 @@ export default function ProjectDetailPage() {
         <TaskList
           tasks={[...openTasks, ...doneTasks]}
           onEditTask={(task) => setForm({ task })}
-          onDeleteTask={handleDeleteTask}
-          onToggleStatus={handleToggleStatus}
+          onDeleteTask={remove}
+          onToggleStatus={toggle}
         />
       )}
 

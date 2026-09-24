@@ -1,5 +1,6 @@
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
+export type TaskRepeat = "daily" | "weekly" | "monthly";
 
 export interface Task {
   id: string;
@@ -12,6 +13,7 @@ export interface Task {
   estimated_duration: number | null; // minutes
   category: string | null;
   project_id: string | null;
-  goal_id: string | null;   
+  goal_id: string | null;
+  repeat: TaskRepeat | null;
   created_at: string; // ISO timestamp
 }
