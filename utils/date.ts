@@ -38,6 +38,29 @@ export function nextOccurrence(
   return next;
 }
 
+// "14:30:00" -> "14:30"
+export function formatTime(time: string): string {
+  return time.slice(0, 5);
+}
+
+export type DayPart = "morning" | "afternoon" | "evening" | "anytime";
+
+export function getDayPart(time: string | null): DayPart {
+  if (!time) return "anytime";
+  const hour = Number(time.slice(0, 2));
+  if (hour < 12) return "morning";
+  if (hour < 17) return "afternoon";
+  return "evening";
+}
+
+// Monday-first week containing the given date
+export function getWeekDays(dateString: string): string[] {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const weekday = (new Date(year, month - 1, day).getDay() + 6) % 7; // Mon = 0
+  const monday = addDays(dateString, -weekday);
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
 export function formatDuration(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);

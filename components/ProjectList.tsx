@@ -29,14 +29,14 @@ export default function ProjectList({
         return (
           <li
             key={project.id}
-            className="group relative flex flex-col rounded-2xl border border-line bg-surface p-4 transition hover:border-muted/40 hover:shadow-sm"
+            className="group relative flex flex-col rounded-2xl bg-surface p-4 shadow-card transition hover:ring-2 hover:ring-accent/20"
           >
             <div className="flex items-start justify-between gap-2">
               <Link
                 href={`/projects/${project.id}`}
                 className="min-w-0 flex-1 after:absolute after:inset-0 after:rounded-2xl"
               >
-                <p className="truncate font-medium text-ink">{project.name}</p>
+                <p className="truncate font-semibold text-ink">{project.name}</p>
               </Link>
               {/* z-10 keeps the buttons clickable above the card-wide link */}
               <div className="relative z-10 -mr-1 -mt-1 flex opacity-70 transition group-hover:opacity-100">

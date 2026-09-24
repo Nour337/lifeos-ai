@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { getTasks } from "@/lib/queries/tasks";
 import { getProjects } from "@/lib/queries/projects";
 import { useTaskActions } from "@/lib/useTaskActions";
+import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import TaskFilters, { type TaskFilterState } from "@/components/TaskFilters";
@@ -34,8 +35,9 @@ export default function TasksPage() {
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
-  // null = closed, { task: null } = new task, { task } = editing
-  const [form, setForm] = useState<{ task: Task | null } | null>(null);
+  const openQuickAdd = useQuickAdd();
+  // null = closed, otherwise the task being edited (new tasks use the "+" button)
+  const [editing, setEditing] = useState<Task | null>(null);
   const [filters, setFilters] = useState<TaskFilterState>({
     status: "all",
     priority: "all",
@@ -61,6 +63,8 @@ export default function TasksPage() {
   useEffect(() => {
     if (user) refreshTasks();
   }, [user, refreshTasks]);
+
+  useTasksChanged(refreshTasks);
 
   const { toggle, remove } = useTaskActions(setTasks, refreshTasks);
 
@@ -89,10 +93,10 @@ export default function TasksPage() {
       .sort(sortTasks);
   }, [tasks, filters]);
 
-  const closeForm = useCallback(() => setForm(null), []);
+  const closeForm = useCallback(() => setEditing(null), []);
 
   const handleTaskSaved = () => {
-    setForm(null);
+    setEditing(null);
     refreshTasks();
   };
 
@@ -103,12 +107,6 @@ export default function TasksPage() {
       <PageHeader
         title="Tasks"
         subtitle={loaded && !loadError ? `${openCount} open` : undefined}
-        action={
-          <Button onClick={() => setForm({ task: null })}>
-            <PlusIcon className="h-4 w-4" />
-            New task
-          </Button>
-        }
       />
 
       <TaskFilters filters={filters} categories={categories} onChange={setFilters} />
@@ -123,7 +121,7 @@ export default function TasksPage() {
           title="No tasks yet"
           text="Add your first task and it will show up here."
           action={
-            <Button onClick={() => setForm({ task: null })}>
+            <Button onClick={() => openQuickAdd()}>
               <PlusIcon className="h-4 w-4" />
               Add a task
             </Button>
@@ -139,20 +137,16 @@ export default function TasksPage() {
         <TaskList
           tasks={filteredTasks}
           projectNames={projectNames}
-          onEditTask={(task) => setForm({ task })}
+          onEditTask={setEditing}
           onDeleteTask={remove}
           onToggleStatus={toggle}
         />
       )}
 
-      <Modal
-        open={form !== null}
-        title={form?.task ? "Edit task" : "New task"}
-        onClose={closeForm}
-      >
-        {form && (
+      <Modal open={editing !== null} title="Edit task" onClose={closeForm}>
+        {editing && (
           <TaskForm
-            editingTask={form.task}
+            editingTask={editing}
             categories={categories}
             onTaskSaved={handleTaskSaved}
             onCancel={closeForm}

@@ -8,7 +8,8 @@ import { CloseIcon } from "@/components/icons";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-accent-ink hover:bg-accent-hover shadow-sm",
+  primary:
+    "bg-gradient-to-r from-grad-from to-grad-to text-white shadow-sm shadow-accent/25 hover:brightness-110",
   secondary: "border border-line bg-surface text-ink hover:bg-surface-2",
   ghost: "text-muted hover:bg-surface-2 hover:text-ink",
   danger: "text-danger hover:bg-danger-soft",
@@ -31,13 +32,13 @@ export function Button({
   return (
     <button
       {...props}
-      className={`inline-flex shrink-0 items-center justify-center rounded-lg font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50 ${buttonVariants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-xl font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50 ${buttonVariants[variant]} ${sizes[size]} ${className}`}
     />
   );
 }
 
 const fieldClass =
-  "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-[15px] text-ink placeholder:text-muted/70 transition focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/20";
+  "w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-[15px] text-ink placeholder:text-muted/70 transition focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/20";
 
 export function Field({
   label,
@@ -88,7 +89,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-line bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-5 ${className}`}
+      className={`rounded-2xl bg-surface p-4 shadow-card sm:p-5 ${className}`}
     >
       {children}
     </section>
@@ -122,7 +123,7 @@ export function PageHeader({
   return (
     <div className="flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
           {title}
         </h1>
         {subtitle && <p className="mt-1 text-muted">{subtitle}</p>}
@@ -144,7 +145,7 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-dashed border-line px-6 py-12 text-center">
+    <div className="flex flex-col items-center rounded-2xl bg-surface px-6 py-12 text-center shadow-card">
       <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft text-accent">
         {icon}
       </div>

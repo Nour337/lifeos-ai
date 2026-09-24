@@ -28,14 +28,14 @@ export default function GoalList({
         return (
           <li
             key={goal.id}
-            className="group rounded-2xl border border-line bg-surface p-4 sm:p-5"
+            className="group rounded-2xl bg-surface p-4 shadow-card sm:p-5"
           >
             <div className="flex items-start justify-between gap-2">
               <button
                 onClick={() => onEditGoal(goal)}
                 className="min-w-0 flex-1 text-left"
               >
-                <p className="text-lg font-medium text-ink">{goal.name}</p>
+                <p className="text-lg font-semibold text-ink">{goal.name}</p>
                 {goal.description && (
                   <p className="mt-0.5 line-clamp-2 text-sm text-muted">
                     {goal.description}

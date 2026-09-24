@@ -4,57 +4,44 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
 import { getTasks } from "@/lib/queries/tasks";
-import { useTaskActions } from "@/lib/useTaskActions";
 import { getGoals } from "@/lib/queries/goals";
 import { getProjects } from "@/lib/queries/projects";
 import { getDisplayName } from "@/lib/queries/profiles";
+import { useTaskActions } from "@/lib/useTaskActions";
+import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import AIPanel from "@/components/AIPanel";
 import TaskForm from "@/components/TaskForm";
-import { TaskCheckbox } from "@/components/TaskList";
-import {
-  Button,
-  Card,
-  ErrorState,
-  Modal,
-  SectionTitle,
-  Skeleton,
-} from "@/components/ui";
-import {
-  CalendarIcon,
-  ChecklistIcon,
-  FolderIcon,
-  PlusIcon,
-  TargetIcon,
-} from "@/components/icons";
+import WeekStrip from "@/components/WeekStrip";
+import { TaskCard } from "@/components/TaskList";
+import { ErrorState, Modal, Skeleton } from "@/components/ui";
+import { FolderIcon, PlusIcon, TargetIcon } from "@/components/icons";
 import {
   addDays,
   describeDue,
-  formatDate,
+  getDayPart,
   getGreeting,
   toLocalDateString,
+  type DayPart,
 } from "@/utils/date";
 import type { Task } from "@/types/task";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
 
-const priorityRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+const dayParts: { key: DayPart; label: string; icon: string; tint: string }[] = [
+  { key: "morning", label: "Morning", icon: "☀️", tint: "bg-warn-soft" },
+  { key: "afternoon", label: "Afternoon", icon: "⛅", tint: "bg-accent-soft" },
+  { key: "evening", label: "Evening", icon: "🌙", tint: "bg-surface-2" },
+  { key: "anytime", label: "Anytime", icon: "📌", tint: "bg-surface-2" },
+];
 
-type Deadline = {
-  id: string;
-  kind: "Task" | "Project" | "Goal";
-  name: string;
-  date: string;
-  href: string;
-};
-
-const deadlineIcons = {
-  Task: ChecklistIcon,
-  Project: FolderIcon,
-  Goal: TargetIcon,
-};
+// Timeline order: by time of day; done tasks stay in place (shown crossed out)
+function byTime(a: Task, b: Task) {
+  return (a.due_time ?? "99").localeCompare(b.due_time ?? "99");
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const openQuickAdd = useQuickAdd();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -62,7 +49,9 @@ export default function DashboardPage() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [now, setNow] = useState(() => new Date());
-  const [formOpen, setFormOpen] = useState(false);
+  const today = toLocalDateString(now);
+  const [selectedDay, setSelectedDay] = useState(today);
+  const [editing, setEditing] = useState<Task | null>(null);
 
   const refresh = useCallback(() => {
     Promise.all([getTasks(), getGoals(), getProjects()])
@@ -82,237 +71,209 @@ export default function DashboardPage() {
     getDisplayName(user.id).then(setDisplayName);
   }, [user, refresh]);
 
+  useTasksChanged(refresh);
+
   // Keep the greeting and "today" correct if the app stays open
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
 
-  const today = toLocalDateString(now);
+  const { toggle, remove } = useTaskActions(setTasks, refresh);
 
-  const todaysTasks = useMemo(
-    () => tasks.filter((task) => task.due_date === today),
-    [tasks, today]
+  const isToday = selectedDay === today;
+
+  const dayTasks = useMemo(
+    () => tasks.filter((t) => t.due_date === selectedDay),
+    [tasks, selectedDay]
   );
 
-  const overdueTasks = useMemo(
+  const overdue = useMemo(
     () =>
-      tasks.filter(
-        (task) =>
-          task.status !== "done" && task.due_date !== null && task.due_date < today
-      ),
-    [tasks, today]
+      isToday
+        ? tasks.filter((t) => t.status !== "done" && t.due_date !== null && t.due_date < today)
+        : [],
+    [tasks, today, isToday]
   );
 
-  const openCount = tasks.filter((t) => t.status !== "done").length;
+  const busyDays = useMemo(
+    () =>
+      new Set(
+        tasks
+          .filter((t) => t.status !== "done" && t.due_date)
+          .map((t) => t.due_date!)
+      ),
+    [tasks]
+  );
 
-  // Most urgent open task: highest priority first, then earliest due date
-  const topTask = useMemo(() => {
-    const open = tasks.filter((task) => task.status !== "done");
-    open.sort((a, b) => {
-      const byPriority = priorityRank[b.priority] - priorityRank[a.priority];
-      if (byPriority !== 0) return byPriority;
-      return (a.due_date ?? "9999-12-31").localeCompare(
-        b.due_date ?? "9999-12-31"
-      );
-    });
-    return open[0] ?? null;
-  }, [tasks]);
+  const groups = useMemo(() => {
+    const result = new Map<DayPart, Task[]>();
+    for (const task of [...dayTasks].sort(byTime)) {
+      const part = getDayPart(task.due_time);
+      result.set(part, [...(result.get(part) ?? []), task]);
+    }
+    return result;
+  }, [dayTasks]);
 
-  const upcoming = useMemo(() => {
-    const start = addDays(today, 1);
+  // Project / goal deadlines in the next 7 days
+  const deadlines = useMemo(() => {
     const end = addDays(today, 7);
-    const inRange = (date: string | null): date is string =>
-      date !== null && date >= start && date <= end;
-
-    const items: Deadline[] = [
-      ...tasks
-        .filter((t) => t.status !== "done" && inRange(t.due_date))
-        .map((t) => ({
-          id: t.id,
-          kind: "Task" as const,
-          name: t.title,
-          date: t.due_date!,
-          href: "/tasks",
-        })),
+    const inRange = (d: string | null): d is string => !!d && d >= today && d <= end;
+    return [
       ...projects
         .filter((p) => inRange(p.deadline))
-        .map((p) => ({
-          id: p.id,
-          kind: "Project" as const,
-          name: p.name,
-          date: p.deadline!,
-          href: `/projects/${p.id}`,
-        })),
+        .map((p) => ({ id: p.id, name: p.name, date: p.deadline!, href: `/projects/${p.id}`, Icon: FolderIcon })),
       ...goals
         .filter((g) => inRange(g.target_date))
-        .map((g) => ({
-          id: g.id,
-          kind: "Goal" as const,
-          name: g.name,
-          date: g.target_date!,
-          href: "/goals",
-        })),
-    ];
-    return items.sort((a, b) => a.date.localeCompare(b.date));
-  }, [tasks, projects, goals, today]);
+        .map((g) => ({ id: g.id, name: g.name, date: g.target_date!, href: "/goals", Icon: TargetIcon })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+  }, [projects, goals, today]);
 
-  const { toggle: handleToggle } = useTaskActions(setTasks, refresh);
-
+  const completed = dayTasks.filter((t) => t.status === "done").length;
+  const pending = dayTasks.length - completed + overdue.length;
   const name = displayName ?? user?.email?.split("@")[0] ?? "there";
-  const doneToday = todaysTasks.filter((t) => t.status === "done").length;
-  const todayList = [...overdueTasks, ...todaysTasks];
+  const [y, m, d] = selectedDay.split("-").map(Number);
+  const selectedLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
+  const cardProps = {
+    showDate: false,
+    onEditTask: setEditing,
+    onDeleteTask: remove,
+    onToggleStatus: toggle,
+  };
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-muted">
-            {now.toLocaleDateString(undefined, {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-            })}
-          </p>
-          <h1 className="mt-0.5 truncate text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-            {getGreeting(now)}, {name}
-          </h1>
-        </div>
-        <Button onClick={() => setFormOpen(true)} aria-label="New task">
-          <PlusIcon className="h-4 w-4" />
-          <span className="hidden sm:inline">New task</span>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+          {getGreeting(now)}, {name} 👋
+        </h1>
+        <p className="mt-0.5 text-muted">
+          {selectedLabel}
+          {!isToday && (
+            <button
+              onClick={() => setSelectedDay(today)}
+              className="ml-2 font-medium text-accent hover:underline"
+            >
+              Back to today
+            </button>
+          )}
+        </p>
       </div>
+
+      <WeekStrip
+        selected={selectedDay}
+        today={today}
+        busyDays={busyDays}
+        onSelect={setSelectedDay}
+      />
 
       {!loaded ? (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
-            <Skeleton className="h-20" />
-            <Skeleton className="h-20" />
-            <Skeleton className="h-20" />
+            <Skeleton className="h-20 rounded-2xl" />
+            <Skeleton className="h-20 rounded-2xl" />
+            <Skeleton className="h-20 rounded-2xl" />
           </div>
-          <Skeleton className="h-28" />
-          <Skeleton className="h-40" />
+          <Skeleton className="h-14 rounded-2xl" />
+          <Skeleton className="h-20 rounded-2xl" />
+          <Skeleton className="h-20 rounded-2xl" />
         </div>
       ) : loadError ? (
         <ErrorState message={loadError} onRetry={refresh} />
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
-            <Stat
-              label="Done today"
-              value={todaysTasks.length ? `${doneToday}/${todaysTasks.length}` : "0"}
-            />
-            <Stat
-              label="Overdue"
-              value={String(overdueTasks.length)}
-              tone={overdueTasks.length > 0 ? "danger" : undefined}
-            />
-            <Stat label="Open" value={String(openCount)} />
+            <Stat label="Tasks" value={dayTasks.length + overdue.length} className="text-ink" />
+            <Stat label="Completed" value={completed} className="text-ok" />
+            <Stat label="Pending" value={pending} className="text-warn" />
           </div>
 
-          {topTask && (
-            <section className="rounded-2xl bg-hero p-5 text-hero-ink">
-              <p className="text-xs font-semibold uppercase tracking-wider opacity-60">
-                Focus on
-              </p>
-              <div className="mt-2 flex items-start gap-3">
-                <button
-                  onClick={() => handleToggle(topTask)}
-                  aria-label={`Mark "${topTask.title}" done`}
-                  className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2 border-current opacity-60 transition hover:opacity-100"
-                />
-                <div className="min-w-0">
-                  <p className="text-lg font-medium leading-snug">
-                    {topTask.title}
-                  </p>
-                  <p className="mt-1 text-sm opacity-60">
-                    <span className="capitalize">{topTask.priority}</span> priority
-                    {topTask.due_date &&
-                      ` · ${describeDue(topTask.due_date, today).label}`}
-                  </p>
-                </div>
-              </div>
-            </section>
+          {isToday && <AIPanel tasks={tasks} onToggle={toggle} />}
+
+          {overdue.length > 0 && (
+            <Group icon="⏰" label="Overdue" tint="bg-danger-soft">
+              {overdue.map((task) => (
+                <TaskCard key={task.id} task={task} {...cardProps} showDate />
+              ))}
+            </Group>
           )}
 
-          <AIPanel tasks={tasks} onToggle={handleToggle} />
+          {dayTasks.length === 0 && overdue.length === 0 ? (
+            <div className="flex flex-col items-center rounded-2xl bg-surface px-6 py-10 text-center shadow-card">
+              <p className="text-3xl">🎉</p>
+              <p className="mt-2 font-semibold text-ink">
+                {isToday ? "Nothing planned for today" : "Nothing planned for this day"}
+              </p>
+              <p className="mt-1 text-sm text-muted">Enjoy it, or add something.</p>
+              <button
+                onClick={() => openQuickAdd({ dueDate: selectedDay })}
+                className="mt-4 flex items-center gap-1.5 rounded-xl bg-accent-soft px-4 py-2 text-sm font-semibold text-accent"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add a task
+              </button>
+            </div>
+          ) : (
+            dayParts
+              .filter((part) => groups.has(part.key))
+              .map((part) => (
+                <Group key={part.key} icon={part.icon} label={part.label} tint={part.tint}>
+                  {groups.get(part.key)!.map((task) => (
+                    <TaskCard key={task.id} task={task} {...cardProps} />
+                  ))}
+                </Group>
+              ))
+          )}
 
-          <Card>
-            <SectionTitle
-              action={
-                <Link href="/tasks" className="text-sm text-accent hover:underline">
-                  All tasks
-                </Link>
-              }
+          {dayTasks.length > 0 && (
+            <button
+              onClick={() => openQuickAdd({ dueDate: selectedDay })}
+              className="flex w-full items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-line py-3 text-sm font-medium text-muted transition hover:border-accent/40 hover:text-accent"
             >
-              Today
-            </SectionTitle>
-            {todayList.length === 0 ? (
-              <p className="py-4 text-center text-muted">
-                Nothing due today — nice! 🎉
-              </p>
-            ) : (
-              <ul className="-mx-1 space-y-0.5">
-                {todayList.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    overdue={task.due_date! < today}
-                    onToggle={handleToggle}
-                  />
-                ))}
-              </ul>
-            )}
-          </Card>
+              <PlusIcon className="h-4 w-4" />
+              Add to {isToday ? "today" : "this day"}
+            </button>
+          )}
 
-          <Card>
-            <SectionTitle>Next 7 days</SectionTitle>
-            {upcoming.length === 0 ? (
-              <p className="py-4 text-center text-muted">
-                No deadlines this week.
-              </p>
-            ) : (
-              <ul className="-mx-1 space-y-0.5">
-                {upcoming.map((item) => {
-                  const Icon = deadlineIcons[item.kind];
-                  return (
-                    <li key={`${item.kind}-${item.id}`}>
-                      <Link
-                        href={item.href}
-                        className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-surface-2"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0 flex-1 truncate text-ink">
-                          {item.name}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1 text-sm text-muted">
-                          <CalendarIcon className="h-3.5 w-3.5" />
-                          {describeDue(item.date, today).label}
-                        </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
+          {deadlines.length > 0 && (
+            <Group icon="🏁" label="Deadlines this week" tint="bg-ok-soft">
+              {deadlines.map((item) => (
+                <li key={item.href + item.id}>
+                  <Link
+                    href={item.href}
+                    className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                      <item.Icon className="h-[18px] w-[18px]" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                      {item.name}
+                    </span>
+                    <span className="text-sm text-muted">
+                      {describeDue(item.date, today).label}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </Group>
+          )}
         </>
       )}
 
-      <Modal open={formOpen} title="New task" onClose={() => setFormOpen(false)}>
-        {formOpen && (
+      <Modal open={editing !== null} title="Edit task" onClose={() => setEditing(null)}>
+        {editing && (
           <TaskForm
-            categories={[
-              ...new Set(tasks.map((t) => t.category).filter((c): c is string => !!c)),
-            ]}
+            editingTask={editing}
             onTaskSaved={() => {
-              setFormOpen(false);
+              setEditing(null);
               refresh();
             }}
-            onCancel={() => setFormOpen(false)}
+            onCancel={() => setEditing(null)}
           />
         )}
       </Modal>
@@ -323,56 +284,40 @@ export default function DashboardPage() {
 function Stat({
   label,
   value,
-  tone,
+  className,
 }: {
   label: string;
-  value: string;
-  tone?: "danger";
+  value: number;
+  className: string;
 }) {
   return (
-    <div
-      className={`rounded-2xl border p-3 sm:p-4 ${
-        tone === "danger"
-          ? "border-transparent bg-danger-soft text-danger"
-          : "border-line bg-surface text-ink"
-      }`}
-    >
-      <p className="text-2xl font-semibold tabular-nums">{value}</p>
-      <p className={`text-xs ${tone === "danger" ? "" : "text-muted"}`}>{label}</p>
+    <div className="rounded-2xl bg-surface p-4 shadow-card">
+      <p className="text-sm text-muted">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${className}`}>{value}</p>
     </div>
   );
 }
 
-function TaskRow({
-  task,
-  overdue,
-  onToggle,
+function Group({
+  icon,
+  label,
+  tint,
+  children,
 }: {
-  task: Task;
-  overdue: boolean;
-  onToggle: (task: Task) => void;
+  icon: string;
+  label: string;
+  tint: string;
+  children: React.ReactNode;
 }) {
-  const done = task.status === "done";
   return (
-    <li className="flex items-center gap-3 rounded-lg px-1 py-2">
-      <TaskCheckbox done={done} title={task.title} onToggle={() => onToggle(task)} />
-      <span
-        className={`min-w-0 flex-1 truncate ${done ? "text-muted line-through" : "text-ink"}`}
-      >
-        {task.title}
-      </span>
-      {overdue ? (
-        <span className="shrink-0 rounded-full bg-danger-soft px-2 py-0.5 text-xs font-medium text-danger">
-          {formatDate(task.due_date!)}
+    <section>
+      <h2 className="mb-3 flex items-center gap-2.5 text-lg font-semibold text-ink">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-full text-base ${tint}`}>
+          {icon}
         </span>
-      ) : (
-        task.priority === "high" &&
-        !done && (
-          <span className="shrink-0 rounded-full bg-danger-soft px-2 py-0.5 text-xs font-medium text-danger">
-            High
-          </span>
-        )
-      )}
-    </li>
+        {label}
+      </h2>
+      <ul className="space-y-3">{children}</ul>
+    </section>
   );
 }

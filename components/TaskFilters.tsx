@@ -36,7 +36,7 @@ export default function TaskFilters({
             placeholder="Search tasks"
             value={filters.search}
             onChange={(e) => onChange({ ...filters, search: e.target.value })}
-            className="w-full rounded-lg border border-line bg-surface py-2.5 pl-9 pr-3 text-[15px] text-ink placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/20"
+            className="w-full rounded-xl border border-line bg-surface py-2.5 pl-9 pr-3 text-[15px] text-ink placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/20"
           />
         </div>
         <Select
@@ -76,8 +76,8 @@ export default function TaskFilters({
               onClick={() => onChange({ ...filters, status: option.value })}
               className={`shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
                 active
-                  ? "border-ink bg-ink text-bg"
-                  : "border-line bg-surface text-muted hover:text-ink"
+                  ? "border-transparent bg-accent text-white shadow-sm shadow-accent/30"
+                  : "border-transparent bg-surface text-muted shadow-card hover:text-ink"
               }`}
             >
               {option.label}

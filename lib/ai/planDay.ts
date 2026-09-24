@@ -94,6 +94,7 @@ function describeTask(task: Task, today: string): string {
           ? "due TODAY"
           : `due ${task.due_date}`
     );
+    if (task.due_time) parts.push(`at ${task.due_time.slice(0, 5)}`);
   } else {
     parts.push("no due date");
   }

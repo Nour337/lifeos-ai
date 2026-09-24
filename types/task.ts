@@ -10,6 +10,7 @@ export interface Task {
   priority: TaskPriority;
   status: TaskStatus;
   due_date: string | null; // ISO date string, e.g. "2026-08-15"
+  due_time: string | null; // "HH:MM:SS" from Postgres, or null for "anytime"
   estimated_duration: number | null; // minutes
   category: string | null;
   project_id: string | null;

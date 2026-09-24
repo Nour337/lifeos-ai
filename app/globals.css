@@ -4,24 +4,27 @@
    (bg-surface, text-muted, border-line, bg-accent...), so dark mode is
    handled here once instead of with dark: classes everywhere. */
 :root {
-  --bg: #f5f5f7;
+  --bg: #f4f5fb;
   --surface: #ffffff;
-  --surface-2: #f0f0f3;
-  --line: #e4e4e9;
-  --ink: #18181b;
-  --muted: #6e6e78;
-  --accent: #5b5bd6;
-  --accent-hover: #4c4cc4;
+  --surface-2: #f1f2f8;
+  --line: #e6e8f0;
+  --ink: #1a1b2e;
+  --muted: #7a7d94;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
   --accent-ink: #ffffff;
-  --accent-soft: #ededfc;
+  --accent-soft: #eef0ff;
+  --grad-from: #3b82f6;
+  --grad-to: #6d4cf0;
   --danger: #dc3e42;
   --danger-soft: #fdecec;
-  --warn: #b86a00;
+  --warn: #e08a00;
   --warn-soft: #fff4d6;
-  --ok: #218358;
+  --ok: #22b566;
   --ok-soft: #e6f6ec;
   --hero: #18181b;
   --hero-ink: #ffffff;
+  --shadow: 0 1px 2px rgba(26, 27, 46, 0.04), 0 4px 16px rgba(26, 27, 46, 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -32,10 +35,12 @@
     --line: #2c2c31;
     --ink: #ededf0;
     --muted: #9b9ba4;
-    --accent: #8b8bf5;
-    --accent-hover: #a0a0f8;
-    --accent-ink: #0c0c0e;
-    --accent-soft: #23234a;
+    --accent: #8b8cff;
+    --accent-hover: #a3a4ff;
+    --accent-ink: #0c0c14;
+    --accent-soft: #1f2146;
+    --grad-from: #3b82f6;
+    --grad-to: #6d4cf0;
     --danger: #ff6369;
     --danger-soft: #3b1618;
     --warn: #ffc53d;
@@ -44,6 +49,7 @@
     --ok-soft: #0f2e1f;
     --hero: #262650;
     --hero-ink: #ededf0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -66,6 +72,9 @@
   --color-ok-soft: var(--ok-soft);
   --color-hero: var(--hero);
   --color-hero-ink: var(--hero-ink);
+  --color-grad-from: var(--grad-from);
+  --color-grad-to: var(--grad-to);
+  --shadow-card: var(--shadow);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

@@ -47,6 +47,7 @@ Project   Task (optional direct link)
 | priority           | text      | low / medium / high        |
 | status             | text      | todo / in_progress / done  |
 | due_date           | date      |                             |
+| due_time           | time, nullable | groups Today into morning / afternoon / evening |
 | estimated_duration | int       | minutes                    |
 | category           | text      |                             |
 | project_id         | uuid, nullable | FK -> projects.id      |

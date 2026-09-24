@@ -18,6 +18,7 @@ type TaskFormProps = {
   editingTask?: Task | null;
   onCancel?: () => void;
   defaultProjectId?: string;
+  defaultDueDate?: string;
   categories?: string[];
 };
 
@@ -29,6 +30,7 @@ export default function TaskForm({
   editingTask,
   onCancel,
   defaultProjectId,
+  defaultDueDate,
   categories = [],
 }: TaskFormProps) {
   const { user, session } = useAuth();
@@ -45,7 +47,12 @@ export default function TaskForm({
   const [status, setStatus] = useState<TaskStatus>(
     editingTask?.status ?? "todo"
   );
-  const [dueDate, setDueDate] = useState(editingTask?.due_date ?? "");
+  const [dueDate, setDueDate] = useState(
+    editingTask?.due_date ?? defaultDueDate ?? ""
+  );
+  const [dueTime, setDueTime] = useState(
+    editingTask?.due_time ? editingTask.due_time.slice(0, 5) : ""
+  );
   const [duration, setDuration] = useState(
     editingTask?.estimated_duration ? String(editingTask.estimated_duration) : ""
   );
@@ -87,6 +94,7 @@ export default function TaskForm({
       priority,
       status,
       due_date: dueDate || null,
+      due_time: dueTime || null,
       estimated_duration: duration ? Number(duration) : null,
       category: category.trim() || null,
       repeat: repeat || null,
@@ -142,6 +150,7 @@ export default function TaskForm({
         priority: editingTask.priority,
         status: "todo",
         due_date: editingTask.due_date,
+        due_time: editingTask.due_time,
         category: editingTask.category,
         project_id: editingTask.project_id,
         goal_id: editingTask.goal_id,
@@ -213,6 +222,16 @@ export default function TaskForm({
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Time">
+          {(id) => (
+            <Input
+              id={id}
+              type="time"
+              value={dueTime}
+              onChange={(e) => setDueTime(e.target.value)}
             />
           )}
         </Field>

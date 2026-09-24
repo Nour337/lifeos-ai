@@ -7,6 +7,7 @@ import { getProjectById } from "@/lib/queries/projects";
 import { getGoalById } from "@/lib/queries/goals";
 import { getTasksByProject } from "@/lib/queries/tasks";
 import { useTaskActions } from "@/lib/useTaskActions";
+import { useTasksChanged } from "@/lib/QuickAdd";
 import { computeProgress } from "@/lib/progress";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
@@ -66,6 +67,8 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (projectId) load();
   }, [projectId, load]);
+
+  useTasksChanged(refreshTasks);
 
   const { toggle, remove } = useTaskActions(setTasks, refreshTasks);
 
