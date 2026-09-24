@@ -5,24 +5,29 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 import { getProjects } from "@/lib/queries/projects";
 import { getGoals } from "@/lib/queries/goals";
-import type { Task, TaskPriority } from "@/types/task";
+import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import type { Task, TaskPriority, TaskStatus } from "@/types/task";
 import type { Project } from "@/types/project";
 import type { Goal } from "@/types/goal";
 
 type TaskFormProps = {
   onTaskSaved: () => void;
   editingTask?: Task | null;
-  onCancelEdit?: () => void;
+  onCancel?: () => void;
+  defaultProjectId?: string;
 };
+
+const priorities: TaskPriority[] = ["low", "medium", "high"];
 
 export default function TaskForm({
   onTaskSaved,
   editingTask,
-  onCancelEdit,
+  onCancel,
+  defaultProjectId,
 }: TaskFormProps) {
   const { user } = useAuth();
-  // Initial values come from editingTask; the parent passes a `key` so the
-  // form remounts (and re-reads these) whenever a different task is edited.
+  // Initial values come from editingTask; the form is remounted (it lives in
+  // a modal, or gets a new `key`) whenever a different task is edited.
   const [title, setTitle] = useState(editingTask?.title ?? "");
   const [description, setDescription] = useState(
     editingTask?.description ?? ""
@@ -30,8 +35,13 @@ export default function TaskForm({
   const [priority, setPriority] = useState<TaskPriority>(
     editingTask?.priority ?? "medium"
   );
+  const [status, setStatus] = useState<TaskStatus>(
+    editingTask?.status ?? "todo"
+  );
   const [dueDate, setDueDate] = useState(editingTask?.due_date ?? "");
-  const [projectId, setProjectId] = useState(editingTask?.project_id ?? "");
+  const [projectId, setProjectId] = useState(
+    editingTask?.project_id ?? defaultProjectId ?? ""
+  );
   const [projects, setProjects] = useState<Project[]>([]);
   const [goalId, setGoalId] = useState(editingTask?.goal_id ?? "");
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -54,27 +64,18 @@ export default function TaskForm({
     setError("");
 
     const taskData = {
-      title,
-      description: description || null,
+      title: title.trim(),
+      description: description.trim() || null,
       priority,
+      status,
       due_date: dueDate || null,
       project_id: projectId || null,
       goal_id: goalId || null,
     };
 
-    let result;
-    if (editingTask) {
-      result = await supabase
-        .from("tasks")
-        .update(taskData)
-        .eq("id", editingTask.id);
-    } else {
-      result = await supabase.from("tasks").insert({
-        user_id: user.id,
-        status: "todo",
-        ...taskData,
-      });
-    }
+    const result = editingTask
+      ? await supabase.from("tasks").update(taskData).eq("id", editingTask.id)
+      : await supabase.from("tasks").insert({ user_id: user.id, ...taskData });
 
     setSaving(false);
 
@@ -83,93 +84,128 @@ export default function TaskForm({
       return;
     }
 
-    setTitle("");
-    setDescription("");
-    setPriority("medium");
-    setDueDate("");
-    setProjectId("");
-    setGoalId("");
     onTaskSaved();
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="w-full max-w-2xl space-y-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-    >
-      <input
-        type="text"
-        placeholder="Task title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        required
-        className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-      />
-      <textarea
-        placeholder="Description (optional)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-      />
-      <div className="flex flex-wrap gap-3">
-        <select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        />
-        <select
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="">No project</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={goalId}
-          onChange={(e) => setGoalId(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="">No goal</option>
-          {goals.map((goal) => (
-            <option key={goal.id} value={goal.id}>
-              {goal.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-md bg-black px-4 py-2 text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          {saving ? "Saving..." : editingTask ? "Update Task" : "Add Task"}
-        </button>
-        {editingTask && onCancelEdit && (
-          <button
-            type="button"
-            onClick={onCancelEdit}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-black dark:border-zinc-700 dark:text-white"
-          >
-            Cancel
-          </button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <Field label="Title">
+        {(id) => (
+          <Input
+            id={id}
+            placeholder="What needs doing?"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            autoFocus={!editingTask}
+          />
         )}
+      </Field>
+
+      <Field label="Notes">
+        {(id) => (
+          <Textarea
+            id={id}
+            placeholder="Optional details"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        )}
+      </Field>
+
+      <div>
+        <p className="mb-1.5 text-sm font-medium text-ink">Priority</p>
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1">
+          {priorities.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPriority(p)}
+              className={`rounded-md py-1.5 text-sm font-medium capitalize transition ${
+                priority === p
+                  ? "bg-surface text-ink shadow-sm"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Due date">
+          {(id) => (
+            <Input
+              id={id}
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Status">
+          {(id) => (
+            <Select
+              id={id}
+              value={status}
+              onChange={(e) => setStatus(e.target.value as TaskStatus)}
+            >
+              <option value="todo">To do</option>
+              <option value="in_progress">In progress</option>
+              <option value="done">Done</option>
+            </Select>
+          )}
+        </Field>
+        <Field label="Project">
+          {(id) => (
+            <Select
+              id={id}
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
+              <option value="">None</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label="Goal">
+          {(id) => (
+            <Select
+              id={id}
+              value={goalId}
+              onChange={(e) => setGoalId(e.target.value)}
+            >
+              <option value="">None</option>
+              {goals.map((goal) => (
+                <option key={goal.id} value={goal.id}>
+                  {goal.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+
+      {error && (
+        <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        {onCancel && (
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+        <Button type="submit" disabled={saving || !title.trim()}>
+          {saving ? "Saving..." : editingTask ? "Save changes" : "Add task"}
+        </Button>
       </div>
     </form>
   );

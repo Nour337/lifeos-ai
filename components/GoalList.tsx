@@ -1,68 +1,86 @@
+"use client";
+
+import ProgressBar from "@/components/ProgressBar";
+import { CalendarIcon, FolderIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { formatDate } from "@/utils/date";
 import type { Goal } from "@/types/goal";
 import type { Progress } from "@/lib/progress";
-import ProgressBar from "@/components/ProgressBar";
+
+const emptyProgress: Progress = { done: 0, total: 0, percent: 0 };
 
 export default function GoalList({
   goals,
   progressByGoal,
+  projectCounts = {},
   onEditGoal,
   onDeleteGoal,
 }: {
   goals: Goal[];
   progressByGoal: Record<string, Progress>;
+  projectCounts?: Record<string, number>;
   onEditGoal: (goal: Goal) => void;
   onDeleteGoal: (id: string) => void;
 }) {
-  if (goals.length === 0) {
-    return (
-      <p className="p-8 text-center text-zinc-500 dark:text-zinc-400">
-        No goals yet. Add one to get started.
-      </p>
-    );
-  }
-
   return (
-    <ul className="w-full max-w-2xl space-y-3">
-      {goals.map((goal) => (
-        <li
-          key={goal.id}
-          className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <div className="flex items-center justify-between">
-            <div
-              onClick={() => onEditGoal(goal)}
-              className="flex-1 cursor-pointer"
-            >
-              <p className="font-medium text-black dark:text-white">
-                {goal.name}
-              </p>
-              {goal.target_date && (
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Target: {goal.target_date}
-                </p>
-              )}
+    <ul className="space-y-3">
+      {goals.map((goal) => {
+        const projectCount = projectCounts[goal.id] ?? 0;
+        return (
+          <li
+            key={goal.id}
+            className="group rounded-2xl border border-line bg-surface p-4 sm:p-5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <button
+                onClick={() => onEditGoal(goal)}
+                className="min-w-0 flex-1 text-left"
+              >
+                <p className="text-lg font-medium text-ink">{goal.name}</p>
+                {goal.description && (
+                  <p className="mt-0.5 line-clamp-2 text-sm text-muted">
+                    {goal.description}
+                  </p>
+                )}
+              </button>
+              <div className="-mr-1 -mt-1 flex opacity-70 transition group-hover:opacity-100">
+                <button
+                  onClick={() => onEditGoal(goal)}
+                  className="rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-ink"
+                  aria-label={`Edit "${goal.name}"`}
+                >
+                  <PencilIcon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete "${goal.name}"?`)) onDeleteGoal(goal.id);
+                  }}
+                  className="rounded-lg p-1.5 text-muted hover:bg-danger-soft hover:text-danger"
+                  aria-label={`Delete "${goal.name}"`}
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Delete "${goal.name}"?`)) {
-                  onDeleteGoal(goal.id);
-                }
-              }}
-              className="rounded-md px-2 py-1 text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-900/20"
-            >
-              Delete
-            </button>
-          </div>
-          <div className="mt-3">
-            <ProgressBar
-              progress={
-                progressByGoal[goal.id] ?? { done: 0, total: 0, percent: 0 }
-              }
-            />
-          </div>
-        </li>
-      ))}
+
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+              {goal.target_date && (
+                <span className="flex items-center gap-1">
+                  <CalendarIcon className="h-3.5 w-3.5" />
+                  Target {formatDate(goal.target_date)}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <FolderIcon className="h-3.5 w-3.5" />
+                {projectCount} {projectCount === 1 ? "project" : "projects"}
+              </span>
+            </div>
+
+            <div className="mt-4">
+              <ProgressBar progress={progressByGoal[goal.id] ?? emptyProgress} />
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }

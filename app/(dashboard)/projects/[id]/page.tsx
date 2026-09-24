@@ -12,7 +12,17 @@ import {
 } from "@/lib/queries/tasks";
 import { computeProgress } from "@/lib/progress";
 import TaskList from "@/components/TaskList";
+import TaskForm from "@/components/TaskForm";
 import ProgressBar from "@/components/ProgressBar";
+import { Button, Card, EmptyState, ListSkeleton, Modal, Skeleton } from "@/components/ui";
+import {
+  ArrowLeftIcon,
+  CalendarIcon,
+  ChecklistIcon,
+  PlusIcon,
+  TargetIcon,
+} from "@/components/icons";
+import { formatDate } from "@/utils/date";
 import type { Project } from "@/types/project";
 import type { Goal } from "@/types/goal";
 import type { Task } from "@/types/task";
@@ -25,6 +35,7 @@ export default function ProjectDetailPage() {
   const [goal, setGoal] = useState<Goal | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<{ task: Task | null } | null>(null);
 
   const refreshTasks = useCallback(() => {
     getTasksByProject(projectId).then(setTasks);
@@ -46,6 +57,13 @@ export default function ProjectDetailPage() {
     });
   }, [projectId]);
 
+  const closeForm = useCallback(() => setForm(null), []);
+
+  const handleTaskSaved = () => {
+    setForm(null);
+    refreshTasks();
+  };
+
   const handleDeleteTask = async (id: string) => {
     if (await deleteTask(id)) refreshTasks();
   };
@@ -54,58 +72,114 @@ export default function ProjectDetailPage() {
     if (await toggleTaskStatus(task.id, task.status)) refreshTasks();
   };
 
-  if (loading) return <p className="p-8">Loading...</p>;
+  const backLink = (
+    <Link
+      href="/projects"
+      className="inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-ink"
+    >
+      <ArrowLeftIcon className="h-4 w-4" />
+      Projects
+    </Link>
+  );
 
-  if (!project) {
+  if (loading) {
     return (
-      <div className="p-8">
-        <p className="text-red-500">Project not found.</p>
-        <Link href="/projects" className="text-blue-500 underline">
-          Back to Projects
-        </Link>
+      <div className="space-y-5">
+        {backLink}
+        <Skeleton className="h-32" />
+        <ListSkeleton rows={3} />
       </div>
     );
   }
 
+  if (!project) {
+    return (
+      <div className="space-y-5">
+        {backLink}
+        <EmptyState
+          icon={<ChecklistIcon />}
+          title="Project not found"
+          text="It may have been deleted."
+        />
+      </div>
+    );
+  }
+
+  const openTasks = tasks.filter((t) => t.status !== "done");
+  const doneTasks = tasks.filter((t) => t.status === "done");
+
   return (
-    <div className="flex flex-col items-center gap-6 p-4 sm:p-8">
-      <div className="w-full max-w-2xl">
-        <Link href="/projects" className="text-sm text-blue-500 underline">
-          ← Back to Projects
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-black dark:text-white">
+    <div className="space-y-5">
+      {backLink}
+
+      <Card>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">
           {project.name}
         </h1>
         {project.description && (
-          <p className="mt-1 text-zinc-600 dark:text-zinc-400">
-            {project.description}
-          </p>
+          <p className="mt-1.5 text-muted">{project.description}</p>
         )}
-        {project.deadline && (
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
-            Deadline: {project.deadline}
-          </p>
-        )}
-        {goal && (
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
-            Goal: <span className="font-medium">{goal.name}</span>
-          </p>
-        )}
-        <div className="mt-4">
+        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+          {project.deadline && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-muted">
+              <CalendarIcon className="h-4 w-4" />
+              Due {formatDate(project.deadline)}
+            </span>
+          )}
+          {goal && (
+            <Link
+              href="/goals"
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1 text-accent"
+            >
+              <TargetIcon className="h-4 w-4" />
+              {goal.name}
+            </Link>
+          )}
+        </div>
+        <div className="mt-5">
           <ProgressBar progress={computeProgress(tasks)} />
         </div>
+      </Card>
+
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-ink">
+          Tasks <span className="font-normal text-muted">({tasks.length})</span>
+        </h2>
+        <Button size="sm" onClick={() => setForm({ task: null })}>
+          <PlusIcon className="h-4 w-4" />
+          Add task
+        </Button>
       </div>
 
-      <h2 className="w-full max-w-2xl text-lg font-medium text-black dark:text-white">
-        Tasks in this project ({tasks.length})
-      </h2>
+      {tasks.length === 0 ? (
+        <EmptyState
+          icon={<ChecklistIcon />}
+          title="No tasks in this project"
+          text="Break the project into small steps you can finish."
+        />
+      ) : (
+        <TaskList
+          tasks={[...openTasks, ...doneTasks]}
+          onEditTask={(task) => setForm({ task })}
+          onDeleteTask={handleDeleteTask}
+          onToggleStatus={handleToggleStatus}
+        />
+      )}
 
-      <TaskList
-        tasks={tasks}
-        onEditTask={() => {}}
-        onDeleteTask={handleDeleteTask}
-        onToggleStatus={handleToggleStatus}
-      />
+      <Modal
+        open={form !== null}
+        title={form?.task ? "Edit task" : "New task"}
+        onClose={closeForm}
+      >
+        {form && (
+          <TaskForm
+            editingTask={form.task}
+            defaultProjectId={projectId}
+            onTaskSaved={handleTaskSaved}
+            onCancel={closeForm}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

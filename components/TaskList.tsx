@@ -1,93 +1,130 @@
+"use client";
+
+import { CalendarIcon, CheckIcon, FolderIcon, TrashIcon } from "@/components/icons";
+import { describeDue, toLocalDateString, type DueTone } from "@/utils/date";
 import type { Task } from "@/types/task";
 
-const priorityColors: Record<string, string> = {
-  high: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
-  low: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+const priorityStyles: Record<string, { dot: string; label: string }> = {
+  high: { dot: "bg-danger", label: "High" },
+  medium: { dot: "bg-warn", label: "Medium" },
+  low: { dot: "bg-muted/50", label: "Low" },
 };
 
-const statusLabels: Record<string, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  done: "Done",
+const dueStyles: Record<DueTone, string> = {
+  overdue: "text-danger",
+  today: "text-accent font-medium",
+  soon: "text-ink",
+  later: "text-muted",
 };
 
 export default function TaskList({
   tasks,
+  projectNames = {},
   onEditTask,
   onDeleteTask,
   onToggleStatus,
 }: {
   tasks: Task[];
+  projectNames?: Record<string, string>;
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
   onToggleStatus: (task: Task) => void;
 }) {
-  if (tasks.length === 0) {
-    return (
-      <p className="p-8 text-center text-zinc-500 dark:text-zinc-400">
-        No tasks yet. Add one to get started.
-      </p>
-    );
-  }
+  const today = toLocalDateString();
 
   return (
-    <ul className="w-full max-w-2xl space-y-3">
-      {tasks.map((task) => (
-        <li
-          key={task.id}
-          className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
-        >
-          <div className="flex flex-1 items-start gap-3">
-            <input
-              type="checkbox"
-              checked={task.status === "done"}
-              onChange={(e) => {
-                e.stopPropagation();
-                onToggleStatus(task);
-              }}
-              className="mt-1 h-5 w-5 cursor-pointer"
+    <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+      {tasks.map((task) => {
+        const done = task.status === "done";
+        const priority = priorityStyles[task.priority] ?? priorityStyles.low;
+        const due = task.due_date ? describeDue(task.due_date, today) : null;
+        const projectName = task.project_id ? projectNames[task.project_id] : null;
+
+        return (
+          <li
+            key={task.id}
+            className="group flex items-start gap-3 px-4 py-3.5 transition hover:bg-surface-2/60"
+          >
+            <TaskCheckbox
+              done={done}
+              title={task.title}
+              onToggle={() => onToggleStatus(task)}
             />
-            <div
+
+            <button
               onClick={() => onEditTask(task)}
-              className="flex-1 cursor-pointer"
+              className="min-w-0 flex-1 text-left"
             >
               <p
-                className={`font-medium text-black dark:text-white ${
-                  task.status === "done" ? "line-through opacity-50" : ""
+                className={`text-[15px] leading-snug ${
+                  done ? "text-muted line-through" : "text-ink"
                 }`}
               >
                 {task.title}
               </p>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {statusLabels[task.status] ?? task.status}
-                {task.due_date && ` · Due ${task.due_date}`}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-medium ${
-                priorityColors[task.priority] ?? priorityColors.low
-              }`}
-            >
-              {task.priority}
-            </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Delete "${task.title}"?`)) {
-                  onDeleteTask(task.id);
-                }
-              }}
-              className="rounded-md px-2 py-1 text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-900/20"
-            >
-              Delete
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                <span className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${priority.dot}`} />
+                  {priority.label}
+                </span>
+                {task.status === "in_progress" && (
+                  <span className="rounded-full bg-accent-soft px-2 py-0.5 font-medium text-accent">
+                    In progress
+                  </span>
+                )}
+                {due && !done && (
+                  <span className={`flex items-center gap-1 ${dueStyles[due.tone]}`}>
+                    <CalendarIcon className="h-3.5 w-3.5" />
+                    {due.label}
+                  </span>
+                )}
+                {projectName && (
+                  <span className="flex items-center gap-1">
+                    <FolderIcon className="h-3.5 w-3.5" />
+                    {projectName}
+                  </span>
+                )}
+              </div>
             </button>
-          </div>
-        </li>
-      ))}
+
+            <button
+              onClick={() => {
+                if (confirm(`Delete "${task.title}"?`)) onDeleteTask(task.id);
+              }}
+              className="-mr-1 rounded-lg p-1.5 text-muted opacity-60 transition hover:bg-danger-soft hover:text-danger group-hover:opacity-100"
+              aria-label={`Delete "${task.title}"`}
+            >
+              <TrashIcon className="h-[18px] w-[18px]" />
+            </button>
+          </li>
+        );
+      })}
     </ul>
+  );
+}
+
+export function TaskCheckbox({
+  done,
+  title,
+  onToggle,
+}: {
+  done: boolean;
+  title: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      role="checkbox"
+      aria-checked={done}
+      aria-label={`Mark "${title}" ${done ? "not done" : "done"}`}
+      onClick={onToggle}
+      className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 transition ${
+        done
+          ? "border-ok bg-ok text-white"
+          : "border-line text-transparent hover:border-accent hover:text-accent/40"
+      }`}
+    >
+      <CheckIcon className="h-3.5 w-3.5" />
+    </button>
   );
 }

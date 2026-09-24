@@ -1,74 +1,93 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import AuthCard from "@/components/AuthCard";
+import { Button, Field, Input, Spinner } from "@/components/ui";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [checkEmail, setCheckEmail] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const router = useRouter();
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage("");
+    setError("");
+    setSubmitting(true);
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signUp({ email, password });
 
     if (error) {
-      setMessage(`Error: ${error.message}`);
+      setError(error.message);
+      setSubmitting(false);
+    } else if (data.session) {
+      // Email confirmation is off: the user is already signed in
+      router.push("/dashboard");
     } else {
-      setMessage("Success! Check your email to confirm your account (if confirmation is enabled), or you're now signed up.");
-      console.log("Signup data:", data);
+      setCheckEmail(true);
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
-      <form
-        onSubmit={handleSignup}
-        className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
-      >
-        <h1 className="mb-6 text-2xl font-semibold text-black dark:text-white">
-          Create your account
-        </h1>
+    <AuthCard
+      title="Create your account"
+      subtitle="Tasks, projects, goals — and an AI to plan your day."
+      footer={{ text: "Already have an account?", linkText: "Log in", href: "/login" }}
+    >
+      {checkEmail ? (
+        <div className="text-center">
+          <p className="font-medium text-ink">Check your email ✉️</p>
+          <p className="mt-2 text-sm text-muted">
+            We sent a confirmation link to <strong>{email}</strong>. Open it, then
+            log in.
+          </p>
+        </div>
+      ) : (
+        <form onSubmit={handleSignup} className="space-y-4">
+          <Field label="Email">
+            {(id) => (
+              <Input
+                id={id}
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            )}
+          </Field>
+          <Field label="Password">
+            {(id) => (
+              <Input
+                id={id}
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                placeholder="At least 6 characters"
+              />
+            )}
+          </Field>
 
-        <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Email
-        </label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="mb-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        />
+          {error && (
+            <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
+          )}
 
-        <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          Password
-        </label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={6}
-          className="mb-6 w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        />
-
-        <button
-          type="submit"
-          className="w-full rounded-md bg-black px-4 py-2 text-white transition hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          Sign Up
-        </button>
-
-        {message && (
-          <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">{message}</p>
-        )}
-      </form>
-    </div>
+          <Button type="submit" disabled={submitting} className="w-full">
+            {submitting && <Spinner />}
+            {submitting ? "Creating account..." : "Create account"}
+          </Button>
+        </form>
+      )}
+    </AuthCard>
   );
 }

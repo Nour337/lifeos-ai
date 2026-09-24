@@ -4,22 +4,23 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 import { getGoals } from "@/lib/queries/goals";
+import { Button, Field, Input, Select, Textarea } from "@/components/ui";
 import type { Project } from "@/types/project";
 import type { Goal } from "@/types/goal";
 
 type ProjectFormProps = {
   onProjectSaved: () => void;
   editingProject?: Project | null;
-  onCancelEdit?: () => void;
+  onCancel?: () => void;
 };
 
 export default function ProjectForm({
   onProjectSaved,
   editingProject,
-  onCancelEdit,
+  onCancel,
 }: ProjectFormProps) {
   const { user } = useAuth();
-  // Initial values come from editingProject; the parent remounts the form via `key`
+  // Initial values come from editingProject; the form remounts per project
   const [name, setName] = useState(editingProject?.name ?? "");
   const [description, setDescription] = useState(
     editingProject?.description ?? ""
@@ -44,24 +45,20 @@ export default function ProjectForm({
     setError("");
 
     const projectData = {
-      name,
-      description: description || null,
+      name: name.trim(),
+      description: description.trim() || null,
       deadline: deadline || null,
       goal_id: goalId || null,
     };
 
-    let result;
-    if (editingProject) {
-      result = await supabase
-        .from("projects")
-        .update(projectData)
-        .eq("id", editingProject.id);
-    } else {
-      result = await supabase.from("projects").insert({
-        user_id: user.id,
-        ...projectData,
-      });
-    }
+    const result = editingProject
+      ? await supabase
+          .from("projects")
+          .update(projectData)
+          .eq("id", editingProject.id)
+      : await supabase
+          .from("projects")
+          .insert({ user_id: user.id, ...projectData });
 
     setSaving(false);
 
@@ -70,70 +67,75 @@ export default function ProjectForm({
       return;
     }
 
-    setName("");
-    setDescription("");
-    setDeadline("");
-    setGoalId("");
     onProjectSaved();
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="w-full max-w-2xl space-y-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-    >
-      <input
-        type="text"
-        placeholder="Project name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-      />
-      <textarea
-        placeholder="Description (optional)"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        className="w-full rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-      />
-      <div className="flex flex-wrap gap-3">
-        <input
-          type="date"
-          value={deadline}
-          onChange={(e) => setDeadline(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        />
-        <select
-          value={goalId}
-          onChange={(e) => setGoalId(e.target.value)}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-black dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
-        >
-          <option value="">No goal</option>
-          {goals.map((goal) => (
-            <option key={goal.id} value={goal.id}>
-              {goal.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-md bg-black px-4 py-2 text-white transition hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          {saving ? "Saving..." : editingProject ? "Update Project" : "Add Project"}
-        </button>
-        {editingProject && onCancelEdit && (
-          <button
-            type="button"
-            onClick={onCancelEdit}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-black dark:border-zinc-700 dark:text-white"
-          >
-            Cancel
-          </button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <Field label="Name">
+        {(id) => (
+          <Input
+            id={id}
+            placeholder="e.g. Launch portfolio site"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus={!editingProject}
+          />
         )}
+      </Field>
+      <Field label="Description">
+        {(id) => (
+          <Textarea
+            id={id}
+            placeholder="Optional"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        )}
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Deadline">
+          {(id) => (
+            <Input
+              id={id}
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Goal">
+          {(id) => (
+            <Select
+              id={id}
+              value={goalId}
+              onChange={(e) => setGoalId(e.target.value)}
+            >
+              <option value="">None</option>
+              {goals.map((goal) => (
+                <option key={goal.id} value={goal.id}>
+                  {goal.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+      {error && (
+        <p className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end gap-2 pt-1">
+        {onCancel && (
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+        <Button type="submit" disabled={saving || !name.trim()}>
+          {saving ? "Saving..." : editingProject ? "Save changes" : "Create project"}
+        </Button>
       </div>
     </form>
   );

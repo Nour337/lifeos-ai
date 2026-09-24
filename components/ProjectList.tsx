@@ -1,76 +1,95 @@
+"use client";
+
 import Link from "next/link";
+import ProgressBar from "@/components/ProgressBar";
+import { CalendarIcon, PencilIcon, TargetIcon, TrashIcon } from "@/components/icons";
+import { formatDate } from "@/utils/date";
 import type { Project } from "@/types/project";
 import type { Progress } from "@/lib/progress";
-import ProgressBar from "@/components/ProgressBar";
+
+const emptyProgress: Progress = { done: 0, total: 0, percent: 0 };
 
 export default function ProjectList({
   projects,
   progressByProject,
+  goalNames = {},
   onEditProject,
   onDeleteProject,
 }: {
   projects: Project[];
   progressByProject: Record<string, Progress>;
+  goalNames?: Record<string, string>;
   onEditProject: (project: Project) => void;
   onDeleteProject: (id: string) => void;
 }) {
-  if (projects.length === 0) {
-    return (
-      <p className="p-8 text-center text-zinc-500 dark:text-zinc-400">
-        No projects yet. Add one to get started.
-      </p>
-    );
-  }
-
   return (
-    <ul className="w-full max-w-2xl space-y-3">
-      {projects.map((project) => (
-        <li
-          key={project.id}
-          className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600"
-        >
-          <Link href={`/projects/${project.id}`} className="flex-1">
-            <p className="font-medium text-black hover:underline dark:text-white">
-              {project.name}
-            </p>
-            {project.deadline && (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                Deadline: {project.deadline}
+    <ul className="grid gap-3 sm:grid-cols-2">
+      {projects.map((project) => {
+        const goalName = project.goal_id ? goalNames[project.goal_id] : null;
+        return (
+          <li
+            key={project.id}
+            className="group relative flex flex-col rounded-2xl border border-line bg-surface p-4 transition hover:border-muted/40 hover:shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <Link
+                href={`/projects/${project.id}`}
+                className="min-w-0 flex-1 after:absolute after:inset-0 after:rounded-2xl"
+              >
+                <p className="truncate font-medium text-ink">{project.name}</p>
+              </Link>
+              {/* z-10 keeps the buttons clickable above the card-wide link */}
+              <div className="relative z-10 -mr-1 -mt-1 flex opacity-70 transition group-hover:opacity-100">
+                <button
+                  onClick={() => onEditProject(project)}
+                  className="rounded-lg p-1.5 text-muted hover:bg-surface-2 hover:text-ink"
+                  aria-label={`Edit "${project.name}"`}
+                >
+                  <PencilIcon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete "${project.name}"?`)) {
+                      onDeleteProject(project.id);
+                    }
+                  }}
+                  className="rounded-lg p-1.5 text-muted hover:bg-danger-soft hover:text-danger"
+                  aria-label={`Delete "${project.name}"`}
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {project.description && (
+              <p className="mt-1 line-clamp-2 text-sm text-muted">
+                {project.description}
               </p>
             )}
-            <div className="mt-2 max-w-xs">
+
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+              {project.deadline && (
+                <span className="flex items-center gap-1">
+                  <CalendarIcon className="h-3.5 w-3.5" />
+                  {formatDate(project.deadline)}
+                </span>
+              )}
+              {goalName && (
+                <span className="flex items-center gap-1">
+                  <TargetIcon className="h-3.5 w-3.5" />
+                  {goalName}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-auto pt-4">
               <ProgressBar
-                progress={
-                  progressByProject[project.id] ?? {
-                    done: 0,
-                    total: 0,
-                    percent: 0,
-                  }
-                }
+                progress={progressByProject[project.id] ?? emptyProgress}
               />
             </div>
-          </Link>
-          <div className="flex gap-2">
-            <button
-              onClick={() => onEditProject(project)}
-              className="rounded-md px-2 py-1 text-sm text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            >
-              Edit
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Delete "${project.name}"?`)) {
-                  onDeleteProject(project.id);
-                }
-              }}
-              className="rounded-md px-2 py-1 text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-900/20"
-            >
-              Delete
-            </button>
-          </div>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }

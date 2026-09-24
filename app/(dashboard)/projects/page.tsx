@@ -4,22 +4,38 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { getProjects, deleteProject } from "@/lib/queries/projects";
 import { getTasks } from "@/lib/queries/tasks";
+import { getGoals } from "@/lib/queries/goals";
 import { getProjectProgress, type Progress } from "@/lib/progress";
 import ProjectList from "@/components/ProjectList";
 import ProjectForm from "@/components/ProjectForm";
+import { Button, EmptyState, Modal, PageHeader, Skeleton } from "@/components/ui";
+import { FolderIcon, PlusIcon } from "@/components/icons";
 import type { Project } from "@/types/project";
 import type { Task } from "@/types/task";
 
 export default function ProjectsPage() {
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [goalNames, setGoalNames] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+  // null = closed, { project: null } = new, { project } = editing
+  const [form, setForm] = useState<{ project: Project | null } | null>(null);
 
   const refreshProjects = useCallback(() => {
-    getProjects().then(setProjects);
-    getTasks().then(setTasks);
+    Promise.all([getProjects(), getTasks(), getGoals()]).then(
+      ([projectData, taskData, goalData]) => {
+        setProjects(projectData);
+        setTasks(taskData);
+        setGoalNames(Object.fromEntries(goalData.map((g) => [g.id, g.name])));
+        setLoaded(true);
+      }
+    );
   }, []);
+
+  useEffect(() => {
+    if (user) refreshProjects();
+  }, [user, refreshProjects]);
 
   const progressByProject = useMemo(() => {
     const result: Record<string, Progress> = {};
@@ -29,44 +45,70 @@ export default function ProjectsPage() {
     return result;
   }, [projects, tasks]);
 
-  useEffect(() => {
-    if (user) refreshProjects();
-  }, [user, refreshProjects]);
+  const closeForm = useCallback(() => setForm(null), []);
 
   const handleProjectSaved = () => {
-    setEditingProject(null);
+    setForm(null);
     refreshProjects();
   };
 
   const handleDeleteProject = async (id: string) => {
-    const success = await deleteProject(id);
-    if (success) {
-      if (editingProject?.id === id) setEditingProject(null);
-      refreshProjects();
-    }
+    if (await deleteProject(id)) refreshProjects();
   };
 
-  if (loading) return <p className="p-8">Loading...</p>;
-
   return (
-    <div className="flex flex-col items-center gap-6 p-4 sm:p-8">
-      <h1 className="w-full max-w-2xl text-2xl font-semibold text-black dark:text-white">
-        Projects
-      </h1>
-
-      <ProjectForm
-        key={editingProject?.id ?? "new"}
-        onProjectSaved={handleProjectSaved}
-        editingProject={editingProject}
-        onCancelEdit={() => setEditingProject(null)}
+    <div className="space-y-5">
+      <PageHeader
+        title="Projects"
+        subtitle="Bigger pieces of work, made of tasks."
+        action={
+          <Button onClick={() => setForm({ project: null })}>
+            <PlusIcon className="h-4 w-4" />
+            New project
+          </Button>
+        }
       />
 
-      <ProjectList
-        projects={projects}
-        progressByProject={progressByProject}
-        onEditProject={setEditingProject}
-        onDeleteProject={handleDeleteProject}
-      />
+      {!loaded ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+        </div>
+      ) : projects.length === 0 ? (
+        <EmptyState
+          icon={<FolderIcon />}
+          title="No projects yet"
+          text="Group related tasks into a project to track progress."
+          action={
+            <Button onClick={() => setForm({ project: null })}>
+              <PlusIcon className="h-4 w-4" />
+              Create a project
+            </Button>
+          }
+        />
+      ) : (
+        <ProjectList
+          projects={projects}
+          progressByProject={progressByProject}
+          goalNames={goalNames}
+          onEditProject={(project) => setForm({ project })}
+          onDeleteProject={handleDeleteProject}
+        />
+      )}
+
+      <Modal
+        open={form !== null}
+        title={form?.project ? "Edit project" : "New project"}
+        onClose={closeForm}
+      >
+        {form && (
+          <ProjectForm
+            editingProject={form.project}
+            onProjectSaved={handleProjectSaved}
+            onCancel={closeForm}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

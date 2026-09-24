@@ -1,18 +1,26 @@
 import type { Progress } from "@/lib/progress";
 
 export default function ProgressBar({ progress }: { progress: Progress }) {
+  const complete = progress.total > 0 && progress.done === progress.total;
   return (
     <div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
         <div
-          className="h-full bg-black transition-all dark:bg-white"
+          className={`h-full rounded-full transition-all duration-500 ${complete ? "bg-ok" : "bg-accent"}`}
           style={{ width: `${progress.percent}%` }}
         />
       </div>
-      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-        {progress.total === 0
-          ? "No tasks yet"
-          : `${progress.percent}% complete · ${progress.done}/${progress.total} tasks`}
+      <p className="mt-1.5 flex justify-between text-xs text-muted">
+        {progress.total === 0 ? (
+          <span>No tasks yet</span>
+        ) : (
+          <>
+            <span>
+              {progress.done} of {progress.total} tasks
+            </span>
+            <span className="font-medium text-ink">{progress.percent}%</span>
+          </>
+        )}
       </p>
     </div>
   );
