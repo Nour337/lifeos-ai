@@ -14,7 +14,7 @@ import {
   toLocalDateString,
   type DueTone,
 } from "@/utils/date";
-import type { Task } from "@/types/task";
+import { isOpen, type Task } from "@/types/task";
 
 // Left edge color: green when done, otherwise by priority
 const edgeColors: Record<string, string> = {
@@ -71,21 +71,31 @@ export function TaskCard({
   showDate?: boolean;
 } & TaskActions) {
   const done = task.status === "done";
+  const skipped = task.status === "skipped";
+  const open = isOpen(task);
   const due =
     showDate && task.due_date ? describeDue(task.due_date, toLocalDateString()) : null;
 
-  // "06:30 • 1h" like a calendar entry
+  // "06:30–08:00 • 1h 30m" like a calendar entry
+  const timeRange = task.due_time
+    ? formatTime(task.due_time) + (task.end_time ? `–${formatTime(task.end_time)}` : "")
+    : null;
   const timeLine = [
-    task.due_time ? formatTime(task.due_time) : null,
+    timeRange,
     task.estimated_duration ? formatDuration(task.estimated_duration) : null,
   ]
     .filter(Boolean)
     .join(" • ");
+  const showProgress = open && task.progress > 0;
 
   return (
     <li
       className={`group flex items-center gap-3 rounded-2xl border-l-4 bg-surface py-3.5 pl-4 pr-2 shadow-card transition ${
-        done ? "border-l-ok" : (edgeColors[task.priority] ?? "border-l-accent")
+        done
+          ? "border-l-ok"
+          : skipped
+            ? "border-l-line opacity-60"
+            : (edgeColors[task.priority] ?? "border-l-accent")
       }`}
     >
       <TaskCheckbox
@@ -97,20 +107,26 @@ export function TaskCard({
       <button onClick={() => onEditTask(task)} className="min-w-0 flex-1 text-left">
         <p
           className={`truncate text-[15px] font-semibold ${
-            done ? "text-muted line-through decoration-muted/60" : "text-ink"
+            !open ? "text-muted line-through decoration-muted/60" : "text-ink"
           }`}
         >
           {task.title}
         </p>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[13px] text-muted">
           {timeLine && <span>{timeLine}</span>}
-          {due && !done && (
+          {skipped && <span className="font-medium">Skipped</span>}
+          {task.status === "rescheduled" && (
+            <span className="rounded-full bg-warn-soft px-2 py-px text-xs font-medium text-warn">
+              Rescheduled
+            </span>
+          )}
+          {due && open && (
             <span className={`flex items-center gap-1 ${dueStyles[due.tone]}`}>
               <CalendarIcon className="h-3.5 w-3.5" />
               {due.label}
             </span>
           )}
-          {task.status === "in_progress" && !done && (
+          {task.status === "in_progress" && (
             <span className="font-medium text-accent">In progress</span>
           )}
           {task.repeat && (
@@ -134,6 +150,17 @@ export function TaskCard({
             <span className="capitalize">{task.priority} priority</span>
           )}
         </div>
+        {showProgress && (
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-surface-2">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-grad-from to-grad-to"
+                style={{ width: `${task.progress}%` }}
+              />
+            </div>
+            <span className="text-xs font-medium text-muted">{task.progress}%</span>
+          </div>
+        )}
       </button>
 
       <button

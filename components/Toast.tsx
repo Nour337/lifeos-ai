@@ -43,10 +43,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={show}>
       {children}
-      {/* Sits above the phone tab bar */}
+      {/* Sits above the phone tab bar and the add button */}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-0 bottom-24 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6"
+        className="pointer-events-none fixed inset-x-0 bottom-40 z-[60] flex flex-col items-center gap-2 px-4 sm:bottom-6"
       >
         {toasts.map((toast) => (
           <div

@@ -15,6 +15,8 @@ const statusOptions = [
   { value: "todo", label: "To do" },
   { value: "in_progress", label: "In progress" },
   { value: "done", label: "Done" },
+  { value: "rescheduled", label: "Rescheduled" },
+  { value: "skipped", label: "Skipped" },
 ];
 
 export default function TaskFilters({

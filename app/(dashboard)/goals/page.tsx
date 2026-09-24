@@ -9,6 +9,7 @@ import { getGoalProgress, type Progress } from "@/lib/progress";
 import GoalList from "@/components/GoalList";
 import GoalForm from "@/components/GoalForm";
 import { useToast } from "@/components/Toast";
+import PlanTabs from "@/components/PlanTabs";
 import { Button, EmptyState, ErrorState, ListSkeleton, Modal, PageHeader } from "@/components/ui";
 import { PlusIcon, TargetIcon } from "@/components/icons";
 import type { Goal } from "@/types/goal";
@@ -78,6 +79,7 @@ export default function GoalsPage() {
 
   return (
     <div className="space-y-5">
+      <PlanTabs active="goals" />
       <PageHeader
         title="Goals"
         subtitle="What you're working toward."

@@ -19,7 +19,7 @@ export function useTasksChanged(callback: () => void) {
   }, [callback]);
 }
 
-type QuickAddOptions = { dueDate?: string };
+type QuickAddOptions = { dueDate?: string; dueTime?: string };
 
 const QuickAddContext = createContext<(options?: QuickAddOptions) => void>(
   () => {}
@@ -37,6 +37,7 @@ export function QuickAddProvider({ children }: { children: React.ReactNode }) {
         {options && (
           <TaskForm
             defaultDueDate={options.dueDate}
+            defaultDueTime={options.dueTime}
             onTaskSaved={() => {
               close();
               notifyTasksChanged();

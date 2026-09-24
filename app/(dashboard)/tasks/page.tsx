@@ -18,11 +18,11 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { ChecklistIcon, PlusIcon, SearchIcon } from "@/components/icons";
-import type { Task } from "@/types/task";
+import { isOpen, type Task } from "@/types/task";
 
 // Open tasks first, then by due date (undated last), newest first as tiebreak
 function sortTasks(a: Task, b: Task) {
-  const doneDiff = Number(a.status === "done") - Number(b.status === "done");
+  const doneDiff = Number(!isOpen(a)) - Number(!isOpen(b));
   if (doneDiff !== 0) return doneDiff;
   const byDue = (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999");
   if (byDue !== 0) return byDue;
@@ -100,7 +100,7 @@ export default function TasksPage() {
     refreshTasks();
   };
 
-  const openCount = tasks.filter((t) => t.status !== "done").length;
+  const openCount = tasks.filter(isOpen).length;
 
   return (
     <div className="space-y-5">

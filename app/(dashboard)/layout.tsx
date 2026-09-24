@@ -7,19 +7,29 @@ import { useAuth } from "@/lib/AuthContext";
 import { QuickAddProvider, useQuickAdd } from "@/lib/QuickAdd";
 import { Button, Spinner } from "@/components/ui";
 import {
+  CalendarIcon,
   ChecklistIcon,
-  FolderIcon,
   PlusIcon,
   SettingsIcon,
+  SparklesIcon,
   SunIcon,
   TargetIcon,
 } from "@/components/icons";
 
+// Phone tab bar: two tabs, the AI button, two tabs
 const navLinks = [
   { href: "/dashboard", label: "Today", Icon: SunIcon },
+  { href: "/calendar", label: "Calendar", Icon: CalendarIcon },
   { href: "/tasks", label: "Tasks", Icon: ChecklistIcon },
-  { href: "/projects", label: "Projects", Icon: FolderIcon },
-  { href: "/goals", label: "Goals", Icon: TargetIcon },
+  { href: "/goals", label: "Goals", Icon: TargetIcon, also: ["/projects"] },
+];
+
+const desktopLinks = [
+  { href: "/dashboard", label: "Today" },
+  { href: "/calendar", label: "Calendar" },
+  { href: "/assistant", label: "✨ Assistant" },
+  { href: "/tasks", label: "Tasks" },
+  { href: "/goals", label: "Goals", also: ["/projects"] },
 ];
 
 export default function DashboardLayout({
@@ -55,15 +65,15 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const openQuickAdd = useQuickAdd();
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string, also: string[] = []) =>
+    [href, ...also].some((h) => pathname === h || pathname.startsWith(`${h}/`));
 
-  const tab = ({ href, label, Icon }: (typeof navLinks)[number]) => (
+  const tab = ({ href, label, Icon, also }: (typeof navLinks)[number]) => (
     <Link
       key={href}
       href={href}
       className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition ${
-        isActive(href) ? "text-accent" : "text-muted"
+        isActive(href, also) ? "text-accent" : "text-muted"
       }`}
     >
       <Icon className="h-6 w-6" />
@@ -84,12 +94,12 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Desktop navigation; phones use the bottom tab bar */}
           <nav className="hidden items-center gap-1 sm:flex">
-            {navLinks.map(({ href, label }) => (
+            {desktopLinks.map(({ href, label, also }) => (
               <Link
                 key={href}
                 href={href}
                 className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
-                  isActive(href)
+                  isActive(href, also)
                     ? "bg-surface text-accent shadow-card"
                     : "text-muted hover:text-ink"
                 }`}
@@ -125,18 +135,31 @@ function AppShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Phone tab bar with the round "+" in the middle */}
+      {/* Quick "add task" button for phones (the chat has its own input) */}
+      {pathname !== "/assistant" && (
+        <button
+          onClick={() => openQuickAdd()}
+          aria-label="Add task"
+          className="fixed bottom-[104px] right-4 z-30 mb-[env(safe-area-inset-bottom)] flex h-12 w-12 items-center justify-center rounded-full bg-surface text-accent shadow-[0_6px_20px_rgba(26,27,46,0.18)] transition active:scale-95 sm:hidden"
+        >
+          <PlusIcon className="h-6 w-6" />
+        </button>
+      )}
+
+      {/* Phone tab bar with the AI assistant in the middle */}
       <nav className="fixed inset-x-3 bottom-3 z-30 mb-[env(safe-area-inset-bottom)] rounded-3xl bg-surface/95 shadow-[0_8px_30px_rgba(26,27,46,0.12)] backdrop-blur-xl sm:hidden">
         <div className="grid grid-cols-5 items-center">
           {navLinks.slice(0, 2).map(tab)}
           <div className="flex justify-center">
-            <button
-              onClick={() => openQuickAdd()}
-              aria-label="Add task"
-              className="-mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-grad-from to-grad-to text-white shadow-lg shadow-accent/40 ring-4 ring-bg transition active:scale-95"
+            <Link
+              href="/assistant"
+              aria-label="AI assistant"
+              className={`-mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-grad-from to-grad-to text-white shadow-lg shadow-accent/40 ring-4 transition active:scale-95 ${
+                pathname === "/assistant" ? "ring-accent/30" : "ring-bg"
+              }`}
             >
-              <PlusIcon className="h-7 w-7" />
-            </button>
+              <SparklesIcon className="h-7 w-7" />
+            </Link>
           </div>
           {navLinks.slice(2).map(tab)}
         </div>

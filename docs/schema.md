@@ -45,14 +45,17 @@ Project   Task (optional direct link)
 | title              | text      |                             |
 | description        | text      |                             |
 | priority           | text      | low / medium / high        |
-| status             | text      | todo / in_progress / done  |
+| status             | text      | todo / in_progress / done / skipped / rescheduled |
 | due_date           | date      |                             |
 | due_time           | time, nullable | groups Today into morning / afternoon / evening |
+| end_time           | time, nullable | end of a timed task |
 | estimated_duration | int       | minutes                    |
 | category           | text      |                             |
 | project_id         | uuid, nullable | FK -> projects.id      |
 | goal_id            | uuid, nullable | FK -> goals.id (direct link, bypasses project) |
 | repeat             | text, nullable | daily / weekly / monthly; completing moves due_date forward |
+| parent_id          | uuid, nullable | FK -> tasks.id (on delete cascade); set on subtasks |
+| progress           | int       | 0-100; cached % of subtasks done, or set by hand |
 | created_at         | timestamp |                             |
 
 ### ai_usage

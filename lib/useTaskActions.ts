@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useToast } from "@/components/Toast";
+import { getSubtasks } from "@/lib/queries/subtasks";
 import {
   deleteTask,
   restoreTask,
@@ -9,7 +10,7 @@ import {
   toggleTaskStatus,
 } from "@/lib/queries/tasks";
 import { describeDue, toLocalDateString } from "@/utils/date";
-import type { Task } from "@/types/task";
+import { isOpen, type Task } from "@/types/task";
 
 // Tick / delete with instant UI updates, error messages, and Undo.
 // Shared by every screen that shows tasks.
@@ -21,7 +22,7 @@ export function useTaskActions(
 
   const toggle = useCallback(
     async (task: Task) => {
-      const isRepeatCompletion = task.repeat && task.status !== "done";
+      const isRepeatCompletion = task.repeat && isOpen(task);
       if (!isRepeatCompletion) {
         setTasks((prev) =>
           prev.map((t) =>
@@ -64,6 +65,9 @@ export function useTaskActions(
     async (task: Task) => {
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
 
+      // Subtasks are deleted with their parent, so keep a copy for Undo
+      const subtasks = await getSubtasks(task.id).catch(() => [] as Task[]);
+
       if (!(await deleteTask(task.id))) {
         toast("Couldn't delete the task. Try again.", { tone: "error" });
         refresh();
@@ -74,8 +78,11 @@ export function useTaskActions(
         action: {
           label: "Undo",
           onClick: async () => {
-            if (!(await restoreTask(task))) {
-              toast("Couldn't restore the task.", { tone: "error" });
+            const restored =
+              (await restoreTask(task)) &&
+              (await Promise.all(subtasks.map(restoreTask))).every(Boolean);
+            if (!restored) {
+              toast("Couldn't fully restore the task.", { tone: "error" });
             }
             refresh();
           },

@@ -43,6 +43,23 @@ export function formatTime(time: string): string {
   return time.slice(0, 5);
 }
 
+// Minutes from "HH:MM" to "HH:MM" (negative if end is before start)
+export function minutesBetween(start: string, end: string): number {
+  const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  return toMinutes(end) - toMinutes(start);
+}
+
+export function timeToMinutes(time: string): number {
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+}
+
+export function minutesToTime(minutes: number): string {
+  const clamped = Math.max(0, Math.min(minutes, 24 * 60 - 1));
+  const h = String(Math.floor(clamped / 60)).padStart(2, "0");
+  const m = String(clamped % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 export type DayPart = "morning" | "afternoon" | "evening" | "anytime";
 
 export function getDayPart(time: string | null): DayPart {

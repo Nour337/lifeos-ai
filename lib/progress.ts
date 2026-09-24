@@ -8,8 +8,10 @@ export type Progress = {
 };
 
 export function computeProgress(tasks: Task[]): Progress {
-  const total = tasks.length;
-  const done = tasks.filter((task) => task.status === "done").length;
+  // Skipped tasks were deliberately dropped, so they don't count either way
+  const counted = tasks.filter((task) => task.status !== "skipped");
+  const total = counted.length;
+  const done = counted.filter((task) => task.status === "done").length;
   const percent = total === 0 ? 0 : Math.round((done / total) * 100);
   return { done, total, percent };
 }

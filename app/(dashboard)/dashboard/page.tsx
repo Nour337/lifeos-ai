@@ -12,9 +12,12 @@ import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import AIPanel from "@/components/AIPanel";
 import TaskForm from "@/components/TaskForm";
 import WeekStrip from "@/components/WeekStrip";
+import WeeklyProgress from "@/components/WeeklyProgress";
+import ProgressBar from "@/components/ProgressBar";
+import { getGoalProgress } from "@/lib/progress";
 import { TaskCard } from "@/components/TaskList";
 import { ErrorState, Modal, Skeleton } from "@/components/ui";
-import { FolderIcon, PlusIcon, TargetIcon } from "@/components/icons";
+import { FolderIcon, PlusIcon, SparklesIcon, TargetIcon } from "@/components/icons";
 import {
   addDays,
   describeDue,
@@ -23,7 +26,7 @@ import {
   toLocalDateString,
   type DayPart,
 } from "@/utils/date";
-import type { Task } from "@/types/task";
+import { isDone, isOpen, type Task } from "@/types/task";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
 
@@ -91,7 +94,7 @@ export default function DashboardPage() {
   const overdue = useMemo(
     () =>
       isToday
-        ? tasks.filter((t) => t.status !== "done" && t.due_date !== null && t.due_date < today)
+        ? tasks.filter((t) => isOpen(t) && t.due_date !== null && t.due_date < today)
         : [],
     [tasks, today, isToday]
   );
@@ -100,7 +103,7 @@ export default function DashboardPage() {
     () =>
       new Set(
         tasks
-          .filter((t) => t.status !== "done" && t.due_date)
+          .filter((t) => isOpen(t) && t.due_date)
           .map((t) => t.due_date!)
       ),
     [tasks]
@@ -129,8 +132,29 @@ export default function DashboardPage() {
     ].sort((a, b) => a.date.localeCompare(b.date));
   }, [projects, goals, today]);
 
-  const completed = dayTasks.filter((t) => t.status === "done").length;
-  const pending = dayTasks.length - completed + overdue.length;
+  const upcoming = useMemo(() => {
+    const end = addDays(selectedDay, 7);
+    return tasks
+      .filter((t) => isOpen(t) && t.due_date && t.due_date > selectedDay && t.due_date <= end)
+      .sort(
+        (a, b) =>
+          a.due_date!.localeCompare(b.due_date!) ||
+          (a.due_time ?? "99").localeCompare(b.due_time ?? "99")
+      )
+      .slice(0, 5);
+  }, [tasks, selectedDay]);
+
+  const goalProgress = useMemo(
+    () =>
+      goals
+        .map((goal) => ({ goal, progress: getGoalProgress(goal.id, tasks, projects) }))
+        .filter(({ progress }) => progress.total > 0 && progress.done < progress.total)
+        .slice(0, 3),
+    [goals, tasks, projects]
+  );
+
+  const completed = dayTasks.filter(isDone).length;
+  const pending = dayTasks.filter(isOpen).length + overdue.length;
   const name = displayName ?? user?.email?.split("@")[0] ?? "there";
   const [y, m, d] = selectedDay.split("-").map(Number);
   const selectedLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, {
@@ -193,7 +217,34 @@ export default function DashboardPage() {
             <Stat label="Pending" value={pending} className="text-warn" />
           </div>
 
-          {isToday && <AIPanel tasks={tasks} onToggle={toggle} />}
+          {dayTasks.length > 0 && (
+            <DayProgress
+              done={completed}
+              total={dayTasks.filter((t) => t.status !== "skipped").length}
+              label={isToday ? "Today's progress" : "Progress"}
+            />
+          )}
+
+          {isToday && (
+            <>
+              <AIPanel tasks={tasks} onToggle={toggle} />
+              <Link
+                href="/assistant"
+                className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                  <SparklesIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold text-ink">Tell the AI what you want to do</span>
+                  <span className="block truncate text-sm text-muted">
+                    “Gym 3 days on, 1 off” · “Exam in 10 days” · “Move my tasks to tomorrow”
+                  </span>
+                </span>
+                <span className="text-muted">›</span>
+              </Link>
+            </>
+          )}
 
           {overdue.length > 0 && (
             <Group icon="⏰" label="Overdue" tint="bg-danger-soft">
@@ -238,6 +289,38 @@ export default function DashboardPage() {
               <PlusIcon className="h-4 w-4" />
               Add to {isToday ? "today" : "this day"}
             </button>
+          )}
+
+          {upcoming.length > 0 && (
+            <Group icon="🗓️" label="Coming up" tint="bg-accent-soft">
+              {upcoming.map((task) => (
+                <TaskCard key={task.id} task={task} {...cardProps} showDate />
+              ))}
+            </Group>
+          )}
+
+          <WeeklyProgress tasks={tasks} weekOf={selectedDay} today={today} />
+
+          {goalProgress.length > 0 && (
+            <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-semibold text-ink">Goals</h2>
+                <Link href="/goals" className="text-sm text-accent hover:underline">
+                  All goals
+                </Link>
+              </div>
+              <ul className="space-y-4">
+                {goalProgress.map(({ goal, progress }) => (
+                  <li key={goal.id}>
+                    <p className="mb-1.5 flex items-center gap-2 text-sm font-medium text-ink">
+                      <TargetIcon className="h-4 w-4 text-accent" />
+                      {goal.name}
+                    </p>
+                    <ProgressBar progress={progress} />
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
 
           {deadlines.length > 0 && (
@@ -295,6 +378,36 @@ function Stat({
       <p className="text-sm text-muted">{label}</p>
       <p className={`mt-1 text-2xl font-bold tabular-nums ${className}`}>{value}</p>
     </div>
+  );
+}
+
+function DayProgress({ done, total, label }: { done: number; total: number; label: string }) {
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <section className="rounded-2xl bg-surface p-4 shadow-card">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold text-ink">{label}</h2>
+        <span className="text-2xl font-bold tabular-nums text-ink">{percent}%</span>
+      </div>
+      <div
+        className="h-2.5 w-full overflow-hidden rounded-full bg-surface-2"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            percent === 100 ? "bg-ok" : "bg-gradient-to-r from-grad-from to-grad-to"
+          }`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-sm text-muted">
+        {done} / {total} tasks completed{percent === 100 && " 🎉"}
+      </p>
+    </section>
   );
 }
 

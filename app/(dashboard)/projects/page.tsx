@@ -9,6 +9,7 @@ import { getProjectProgress, type Progress } from "@/lib/progress";
 import ProjectList from "@/components/ProjectList";
 import ProjectForm from "@/components/ProjectForm";
 import { useToast } from "@/components/Toast";
+import PlanTabs from "@/components/PlanTabs";
 import { Button, EmptyState, ErrorState, Modal, PageHeader, Skeleton } from "@/components/ui";
 import { FolderIcon, PlusIcon } from "@/components/icons";
 import type { Project } from "@/types/project";
@@ -68,6 +69,7 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-5">
+      <PlanTabs active="projects" />
       <PageHeader
         title="Projects"
         subtitle="Bigger pieces of work, made of tasks."

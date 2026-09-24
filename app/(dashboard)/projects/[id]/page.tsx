@@ -31,7 +31,7 @@ import {
 import { formatDate } from "@/utils/date";
 import type { Project } from "@/types/project";
 import type { Goal } from "@/types/goal";
-import type { Task } from "@/types/task";
+import { isOpen, type Task } from "@/types/task";
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -121,8 +121,8 @@ export default function ProjectDetailPage() {
     );
   }
 
-  const openTasks = tasks.filter((t) => t.status !== "done");
-  const doneTasks = tasks.filter((t) => t.status === "done");
+  const openTasks = tasks.filter(isOpen);
+  const doneTasks = tasks.filter((t) => !isOpen(t));
 
   return (
     <div className="space-y-5">

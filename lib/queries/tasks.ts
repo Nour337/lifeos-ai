@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabaseClient";
-import { nextOccurrence, toLocalDateString } from "@/utils/date";
-import type { Task, TaskStatus } from "@/types/task";
+import {
+  minutesToTime,
+  nextOccurrence,
+  timeToMinutes,
+  toLocalDateString,
+} from "@/utils/date";
+import { isOpen, type Task, type TaskStatus } from "@/types/task";
 
 // Loaders throw so screens can show "Couldn't load..." instead of looking
 // empty. Mutations return false on failure so callers can show a message.
@@ -9,6 +14,7 @@ export async function getTasks(): Promise<Task[]> {
   const { data, error } = await supabase
     .from("tasks")
     .select("*")
+    .is("parent_id", null) // subtasks are shown inside their parent
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -24,6 +30,7 @@ export async function getTasksByProject(projectId: string): Promise<Task[]> {
     .from("tasks")
     .select("*")
     .eq("project_id", projectId)
+    .is("parent_id", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -64,7 +71,7 @@ export type ToggleResult =
 // Ticking a repeating task doesn't mark it done: it moves to its next date,
 // so there is always exactly one copy of it.
 export async function toggleTaskStatus(task: Task): Promise<ToggleResult> {
-  if (task.repeat && task.status !== "done") {
+  if (task.repeat && isOpen(task)) {
     const today = toLocalDateString();
     const movedTo = nextOccurrence(task.due_date ?? today, task.repeat, today);
     const { error } = await supabase
@@ -91,6 +98,31 @@ export async function toggleTaskStatus(task: Task): Promise<ToggleResult> {
   }
 
   return { ok: true };
+}
+
+// Used by calendar drag and drop. `time` undefined = keep the time,
+// null = make it an "anytime" task. The duration is kept when moving.
+export async function moveTask(
+  task: Task,
+  date: string,
+  time?: string | null
+): Promise<Partial<Task> | null> {
+  const changes: Partial<Task> = { due_date: date };
+  if (time !== undefined) {
+    changes.due_time = time;
+    changes.end_time = null;
+    if (time && task.due_time && task.end_time) {
+      const length = timeToMinutes(task.end_time) - timeToMinutes(task.due_time);
+      if (length > 0) changes.end_time = minutesToTime(timeToMinutes(time) + length);
+    }
+  }
+
+  const { error } = await supabase.from("tasks").update(changes).eq("id", task.id);
+  if (error) {
+    console.error("Error moving task:", error.message);
+    return null;
+  }
+  return changes;
 }
 
 export async function setTaskDueDate(

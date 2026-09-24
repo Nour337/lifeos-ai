@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui";
 import { CalendarIcon, SparklesIcon } from "@/components/icons";
 import { TaskCheckbox } from "@/components/TaskList";
 import type { AIResult, PlanItem } from "@/lib/ai/planDay";
-import type { Task } from "@/types/task";
+import { isOpen, type Task } from "@/types/task";
 
 type Mode = "plan" | "next";
 
@@ -40,7 +40,7 @@ export default function AIPanel({
     if (user) getAICreditsLeft(user.id).then(setCreditsLeft);
   }, [user]);
 
-  const hasOpenTasks = tasks.some((t) => t.status !== "done");
+  const hasOpenTasks = tasks.some(isOpen);
   const outOfCredits = creditsLeft === 0;
 
   const ask = async (mode: Mode) => {

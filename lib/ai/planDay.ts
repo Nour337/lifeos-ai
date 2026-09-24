@@ -44,7 +44,8 @@ export async function getOpenTasks(supabase: SupabaseClient): Promise<Task[]> {
   const { data, error } = await supabase
     .from("tasks")
     .select("*")
-    .neq("status", "done")
+    .not("status", "in", "(done,skipped)")
+    .is("parent_id", null)
     .order("due_date", { ascending: true, nullsFirst: false })
     .limit(MAX_TASKS);
 
@@ -177,7 +178,7 @@ export async function askAI(prompt: Prompt): Promise<unknown> {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
         messages: [
           { role: "system", content: prompt.system },
           { role: "user", content: prompt.user },
