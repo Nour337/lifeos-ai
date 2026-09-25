@@ -36,8 +36,8 @@ function intro(mode: Mode, name: string | null): Message {
     return {
       id: "intro",
       role: "assistant",
-      content: `Hi${name ? ` ${name}` : ""} 👋 What's new? Tell me about a new course or exam, a project, a goal, a change in your schedule, or anything else I should know.`,
-      quickReplies: ["New course or exam", "New project", "New goal", "My schedule changed", "Change how you talk to me"],
+      content: `Hi${name ? ` ${name}` : ""} 👋 What's new? Tell me anything that changed: you started working, a new course or exam, a project, a business idea, a goal, your schedule…`,
+      quickReplies: ["I started working", "New course or exam", "New project", "New goal", "My schedule changed", "Change how you talk to me"],
     };
   }
   return {
@@ -46,15 +46,18 @@ function intro(mode: Mode, name: string | null): Message {
     content: [
       `Hey${name ? ` ${name}` : ""} 👋`,
       "",
-      "I'm your new AI planner. I'll help you organize your life and turn your goals into actionable tasks.",
+      "I'm your new AI planner. Let's create your AI Persona: who you are, what you're doing and what you want. After that, your Persona AI is unlimited.",
       "",
-      "Before we start, I need to understand you a little. It takes about 3 minutes, and you can skip anything.",
+      "It takes about 3 minutes, and you can skip anything.",
       "",
-      name ? "What are you currently doing?" : "First, what should I call you?",
+      name
+        ? "What are you doing these days? Pick everything that fits: you can be a student and working at the same time."
+        : "First, what should I call you?",
     ].join("\n"),
     quickReplies: name
-      ? ["I'm a student", "I work full-time", "I run a business", "I'm a freelancer", "Something else"]
+      ? ["🎓 Student", "💼 Working", "🚀 Entrepreneur", "💻 Freelancer", "✨ Something else"]
       : [],
+    multiSelect: !!name,
   };
 }
 
@@ -219,7 +222,7 @@ export default function OnboardingPage() {
             <p className="mt-1.5 text-xs text-muted">
               {finished
                 ? "All set 🎉"
-                : `Getting to know you · ${doneCount} of ${SECTIONS.length}: ${SECTIONS.filter((s) => sections[s.key])
+                : `Creating your AI Persona · ${doneCount} of ${SECTIONS.length}: ${SECTIONS.filter((s) => sections[s.key])
                     .map((s) => s.emoji)
                     .join(" ")}`}
             </p>
@@ -415,7 +418,7 @@ function QuickReplies({
       </div>
       {multi && picked.length > 0 && (
         <button
-          onClick={() => onSubmit(picked.join(", "))}
+          onClick={() => onSubmit(picked.join(" + "))}
           className="rounded-xl bg-gradient-to-r from-grad-from to-grad-to px-4 py-2 text-sm font-semibold text-white shadow-md shadow-accent/30"
         >
           Continue with {picked.length}

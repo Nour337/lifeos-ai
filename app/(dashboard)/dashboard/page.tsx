@@ -32,7 +32,7 @@ import {
 import { isDone, isOpen, type Task } from "@/types/task";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
-import { SECTIONS, type Profile } from "@/types/persona";
+import { personaActive, SECTIONS, type Profile } from "@/types/persona";
 
 const dayParts: { key: DayPart; label: string; icon: string; tint: string }[] = [
   { key: "morning", label: "Morning", icon: "☀️", tint: "bg-warn-soft" },
@@ -234,7 +234,7 @@ export default function DashboardPage() {
 
           {isToday && (
             <>
-              {sectionsDone < SECTIONS.length - 2 && (
+              {profile && (!personaActive(profile) || sectionsDone < SECTIONS.length - 2) && (
                 <Link
                   href="/onboarding"
                   className="flex items-center gap-3 rounded-2xl bg-hero p-4 text-hero-ink shadow-card transition hover:brightness-110"
@@ -243,9 +243,11 @@ export default function DashboardPage() {
                     <BrainIcon className="h-5 w-5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block font-semibold">Help your AI get to know you</span>
+                    <span className="block font-semibold">
+                      {personaActive(profile) ? "Complete your AI Persona" : "Create your AI Persona"}
+                    </span>
                     <span className="block text-sm opacity-75">
-                      {sectionsDone} of {SECTIONS.length} done · better suggestions in 3 minutes
+                      {sectionsDone} of {SECTIONS.length} done · unlimited Persona AI
                     </span>
                   </span>
                   <span className="opacity-60">›</span>
@@ -257,8 +259,9 @@ export default function DashboardPage() {
                 tasks={tasks}
                 profile={profile?.ai_profile ?? null}
                 today={today}
+                personaActive={personaActive(profile)}
               />
-              <AIPanel tasks={tasks} onToggle={toggle} />
+              <AIPanel tasks={tasks} onToggle={toggle} personaActive={personaActive(profile)} />
               <Link
                 href="/assistant"
                 className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"

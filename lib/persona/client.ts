@@ -1,4 +1,5 @@
 import type { Session } from "@supabase/supabase-js";
+import type { Usage } from "@/lib/persona/types";
 
 // Browser-side POST to one of the AI routes. Throws an Error with a friendly
 // message on failure.
@@ -6,7 +7,7 @@ export async function postAI<T>(
   session: Session,
   path: "/api/coach" | "/api/onboarding",
   body: Record<string, unknown>
-): Promise<T & { remaining?: number }> {
+): Promise<T & { usage?: Usage; remaining?: number }> {
   let response: Response;
   try {
     response = await fetch(path, {

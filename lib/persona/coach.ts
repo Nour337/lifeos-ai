@@ -10,7 +10,7 @@ import type {
   Suggestion,
   WeeklyReview,
 } from "@/lib/persona/types";
-import { cleanText, newId } from "@/types/persona";
+import { blocksOn, cleanText, newId } from "@/types/persona";
 import { addDays, timeToMinutes } from "@/utils/date";
 import type { Task, TaskPriority } from "@/types/task";
 
@@ -125,6 +125,11 @@ export function freeWindow(data: PersonaData, today: string, localTime: string):
   for (const t of data.tasks) {
     if (t.due_date !== today || !t.due_time || t.status === "done" || t.status === "skipped") continue;
     const start = timeToMinutes(t.due_time);
+    if (start > now && start < end) end = start;
+  }
+  // Work / university later today also ends the free window
+  for (const b of blocksOn(data.profile.ai_profile.blocks, today)) {
+    const start = timeToMinutes(b.start);
     if (start > now && start < end) end = start;
   }
   return Math.max(0, Math.min(end - now, 180));

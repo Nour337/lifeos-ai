@@ -11,9 +11,11 @@ import {
   getDisplayName,
   saveDisplayName,
 } from "@/lib/queries/profiles";
+import { getProfile } from "@/lib/queries/persona";
+import { personaActive } from "@/types/persona";
 import { useToast } from "@/components/Toast";
 import { Button, Card, Field, Input, PageHeader, SectionTitle, Skeleton } from "@/components/ui";
-import { LogoutIcon, SparklesIcon, UserIcon } from "@/components/icons";
+import { BrainIcon, LogoutIcon, SparklesIcon, UserIcon } from "@/components/icons";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -24,6 +26,7 @@ export default function SettingsPage() {
   const [nameLoaded, setNameLoaded] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [creditsLeft, setCreditsLeft] = useState<number | null>(null);
+  const [hasPersona, setHasPersona] = useState(false);
 
   const [password, setPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
@@ -35,6 +38,9 @@ export default function SettingsPage() {
       setNameLoaded(true);
     });
     getAICreditsLeft(user.id).then(setCreditsLeft);
+    getProfile(user.id)
+      .then((p) => setHasPersona(personaActive(p)))
+      .catch(() => setHasPersona(false));
   }, [user]);
 
   const handleSaveName = async (e: React.FormEvent) => {
@@ -78,8 +84,8 @@ export default function SettingsPage() {
           <UserIcon className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-semibold text-ink">My AI profile</span>
-          <span className="block text-sm text-muted">What your AI knows about you, and how it behaves</span>
+          <span className="block font-semibold text-ink">My AI Persona</span>
+          <span className="block text-sm text-muted">Who you are, what you&apos;re doing, what you want, and how your AI behaves</span>
         </span>
         <span className="text-muted">›</span>
       </Link>
@@ -111,19 +117,33 @@ export default function SettingsPage() {
       </Card>
 
       <Card>
-        <SectionTitle>AI assistant</SectionTitle>
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
-            <SparklesIcon />
-          </span>
-          <div>
-            <p className="font-medium text-ink">
-              {creditsLeft === null ? "…" : creditsLeft} of {AI_DAILY_LIMIT} questions
-              left today
-            </p>
-            <p className="text-sm text-muted">
-              The limit keeps AI costs under control. It resets every day.
-            </p>
+        <SectionTitle>AI usage</SectionTitle>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
+              <SparklesIcon />
+            </span>
+            <div>
+              <p className="font-medium text-ink">
+                AI messages today: {creditsLeft === null ? "…" : AI_DAILY_LIMIT - creditsLeft} / {AI_DAILY_LIMIT}
+              </p>
+              <p className="text-sm text-muted">Normal AI chat. Resets every day.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-ok-soft text-ok">
+              <BrainIcon />
+            </span>
+            <div>
+              <p className="font-medium text-ink">
+                Persona AI: {hasPersona ? "Unlimited ✓" : "not active"}
+              </p>
+              <p className="text-sm text-muted">
+                {hasPersona
+                  ? "Persona chat, suggestions, planning and reviews don't use your 10 messages."
+                  : "Create your AI Persona to make persona-powered AI unlimited."}
+              </p>
+            </div>
           </div>
         </div>
       </Card>

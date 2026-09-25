@@ -7,10 +7,13 @@ import { sectionStatus } from "@/lib/persona/sections";
 import type { PersonaData } from "@/lib/persona/server";
 import {
   AI_STYLES,
+  ROLE_OPTIONS,
+  parseRoles,
   cleanList,
   cleanNumber,
   cleanText,
   INTEREST_OPTIONS,
+  mergeBlocks,
   newId,
   oneOf,
   parseAIProfile,
@@ -76,18 +79,45 @@ const TOOL = {
             "FIRST, list every NEW fact in the user's LAST message only (names, courses, exam dates, projects, deadlines, goals, times, routines, preferences). Then put each one in the matching field below.",
         },
         name: { type: "string", description: "What the user wants to be called." },
-        about: {
+        roles: {
+          type: "array",
+          items: { type: "string", enum: ROLE_OPTIONS.map((r) => r.value) },
+          description: "ALL roles the user has at the same time (e.g. student AND working). Send the full list.",
+        },
+        headline: { type: "string", description: 'Short description, e.g. "Engineering student & junior developer"' },
+        age_range: { type: "string", description: "Only if the user chooses to share it, e.g. 18-24" },
+        education: {
           type: "object",
           properties: {
-            role: { type: "string", description: 'e.g. "Engineering student", "Marketing manager"' },
-            occupation: { type: "string", enum: ["student", "employee", "entrepreneur", "freelancer", "other"] },
-            organization: { type: "string", description: "University, company or business" },
-            field: { type: "string" },
+            university: { type: "string" },
+            faculty: { type: "string" },
+            major: { type: "string" },
             term: { type: "string", description: 'Year/term, e.g. "Last term", "3rd year"' },
+            graduation: { type: "string", description: 'Expected graduation, e.g. "June 2027"' },
+          },
+        },
+        job: {
+          type: "object",
+          description: "Their job, if they work.",
+          properties: {
+            job: { type: "string", description: "Job title" },
+            company: { type: "string", description: "Company or business" },
+            hours: { type: "string", description: 'Working hours, e.g. "Sun-Thu 16:00-22:00"' },
+            responsibilities: { type: "string" },
+          },
+        },
+        business: {
+          type: "object",
+          properties: {
+            ideas: { type: "array", items: { type: "string" }, description: "Business ideas to ADD." },
+            interests: { type: "array", items: { type: "string" }, description: "Business interests to ADD (SaaS, agency...)." },
           },
         },
         interests: { type: "array", items: { type: "string" }, description: "Interests to ADD." },
-        skills: { type: "array", items: { type: "string" }, description: "Specific skills to ADD." },
+        skills: { type: "array", items: { type: "string" }, description: "Specific skills to develop, to ADD." },
+        tools: { type: "array", items: { type: "string" }, description: "Tools/technologies they want to learn (n8n, Make...), to ADD." },
+        tech_stack: { type: "array", items: { type: "string" }, description: "Technologies they already use, to ADD." },
+        learning: { type: "array", items: { type: "string" }, description: "Courses or topics they want to take, to ADD." },
         courses: {
           type: "array",
           description: "Courses the user is studying (new or updated, matched by name).",
@@ -107,7 +137,7 @@ const TOOL = {
         },
         work: {
           type: "array",
-          description: "Projects, jobs, freelance, business ideas, research... (new or updated, matched by name).",
+          description: "Concrete projects with work to do: graduation project, work projects, freelance clients, a business they are building, research (new or updated, matched by name).",
           items: {
             type: "object",
             properties: {
@@ -160,9 +190,23 @@ const TOOL = {
             free_time: { type: "string", description: 'Free time to keep daily, e.g. "2 hours"' },
           },
         },
+        busy_blocks: {
+          type: "array",
+          description: "Fixed weekly busy times: university hours, work shifts. Replaces blocks with the same label.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: 'e.g. "University", "Work"' },
+              days: { type: "array", items: { type: "string", enum: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } },
+              start: { type: "string", description: "HH:MM" },
+              end: { type: "string", description: "HH:MM" },
+            },
+            required: ["label", "days", "start", "end"],
+          },
+        },
         habits: {
           type: "array",
-          description: "Recurring activities (gym, prayer, reading, work...).",
+          description: "Recurring activities (gym, prayer, reading...).",
           items: {
             type: "object",
             properties: {
@@ -184,7 +228,7 @@ const TOOL = {
         remove: {
           type: "array",
           items: { type: "string" },
-          description: "Names of interests, skills or recurring activities the user no longer has.",
+          description: "Names of interests, skills, tools, business ideas or recurring activities the user no longer has.",
         },
         covered_sections: {
           type: "array",
@@ -233,14 +277,17 @@ function systemPrompt(data: PersonaData, today: string, mode: "onboarding" | "up
 
 Rules:
 - Reply in the user's language. Keep messages short (1-3 sentences). Warm, human, no bullet-point interrogations.
-- Always call the respond tool. First write "learned", then save EVERY fact from the user's last message in the matching fields of the same call (name, about, courses, work, goals, schedule, habits, interests, skills...). Your reply is only shown to the user; anything not in the fields is lost. Only send facts from the LAST message (new or changed); never re-send what is already saved, so nothing gets overwritten by mistake. Example: "Database Systems, exam December 15, hard" → courses: [{name: "Database Systems", exam_date: "YYYY-12-15", difficulty: "hard"}]. Infer sensibly: "engineering student in my last term" → occupation student, role "Engineering student", term "Last term".
+- Always call the respond tool. First write "learned", then save EVERY fact from the user's last message in the matching fields of the same call (name, about, courses, work, goals, schedule, habits, interests, skills...). Your reply is only shown to the user; anything not in the fields is lost. Only send facts from the LAST message (new or changed); never re-send what is already saved, so nothing gets overwritten by mistake. Example: "Database Systems, exam December 15, hard" → courses: [{name: "Database Systems", exam_date: "YYYY-12-15", difficulty: "hard"}]. Infer sensibly: "engineering student in my last term, and I work part-time as a developer" → roles ["student", "working"], headline "Engineering student & part-time developer", education.term "Last term", job.job "Developer".
+- A person can have SEVERAL roles at once (student + working + entrepreneur...). Never make them choose one. roles is always the complete list; if they say "I started working", send their old roles plus "working".
+- Cover what matters for their roles: students → university, faculty, major, year/term, graduation, courses and exams; working → job, company, working hours, responsibilities, work projects; entrepreneurs → business ideas and goals; everyone → interests, AI/tech tools, skills, goals, schedule, routines (fitness, prayer...), AI style. Age range only if they volunteer it.
 - A graduation project, thesis, job, internship or business goes in work (with its kind), not courses.
+- Fixed weekly hours (university classes, work shifts) go in busy_blocks with days and HH:MM times, e.g. "University Sun-Thu 9 to 3" → {label: "University", days: ["sun","mon","tue","wed","thu"], start: "09:00", end: "15:00"}. Also keep the text in schedule.busy / job.hours.
 - Rules about how to plan or behave ("never schedule on Friday mornings", "remind me to take breaks") go in instructions. Don't invent values the user didn't give.
 - Briefly reflect what you understood ("Nice. So your main areas are engineering, business and AI automation."), then ask ONE next question. You may combine 2-3 tightly related small questions (e.g. wake and sleep time).
-- Decide the next question from what you know: students → courses and exams; employees → job and projects; everyone → projects, interests, goals, schedule, routines, AI style. Skip what doesn't apply.
+- Decide the next question from what you know, and skip what doesn't apply to their roles.
 - Courses: ask the names first, then in one question the key details for them (exam dates, how important/hard, progress, hours per week). Accept rough answers; never insist.
 - Goals: for each, try to learn why it matters, target date, priority and weekly hours, but at most one follow-up question for all goals together.
-- Offer quick_replies whenever there are natural choices, and always a "Skip for now" option. If the user skips, add that section to covered_sections and move on.
+- Offer quick_replies whenever there are natural choices, and always a "Skip for now" option. Use multi_select=true when several answers can be true at once (roles, interests, days). If the user skips, add that section to covered_sections and move on.
 - When asking about interests use widget "interests" (the app shows a picker with: ${INTEREST_OPTIONS.join(", ")}). When asking how the AI should behave use widget "style" (Friendly, Direct, Coach, Professional, Teacher, Balanced) and also ask for any custom instructions.
 - Add a section to covered_sections once it's answered or skipped. Sections: ${SECTION_KEYS.join(", ")}.
 - Aim for about 8-12 questions in total. Don't ask about things already known.
@@ -304,7 +351,9 @@ export async function saveOnboardingTurn(
   args: Record<string, unknown>
 ): Promise<{ profile: AIProfile; finished: boolean }> {
   const current = data.profile.ai_profile;
-  const about = record(args.about);
+  const education = record(args.education);
+  const job = record(args.job);
+  const business = record(args.business);
   const schedule = record(args.schedule);
   const preferences = record(args.preferences);
   const remove = cleanList(args.remove, 20, 60).map((r) => r.toLowerCase());
@@ -341,12 +390,34 @@ export async function saveOnboardingTurn(
   // parseAIProfile validates the merged result
   const next = parseAIProfile({
     ...current,
-    about: { ...current.about, ...defined(about) },
+    about: {
+      roles: args.roles !== undefined ? parseRoles(args.roles) : current.about.roles,
+      headline: cleanText(args.headline, 100) ?? current.about.headline,
+      age_range: cleanText(args.age_range, 20) ?? current.about.age_range,
+    },
+    education: { ...current.education, ...defined(education) },
+    work: {
+      ...current.work,
+      ...defined({
+        job: job.job,
+        company: job.company,
+        hours: job.hours,
+        responsibilities: job.responsibilities,
+      }),
+    },
+    business: {
+      ideas: [...current.business.ideas, ...cleanList(business.ideas, 10, 150)].filter(keep),
+      interests: [...current.business.interests, ...cleanList(business.interests)].filter(keep),
+    },
     interests: [...current.interests, ...cleanList(args.interests)].filter(keep),
     skills: [...current.skills, ...cleanList(args.skills)].filter(keep),
+    tools: [...current.tools, ...cleanList(args.tools)].filter(keep),
+    tech_stack: [...current.tech_stack, ...cleanList(args.tech_stack)].filter(keep),
+    learning: [...current.learning, ...cleanList(args.learning)].filter(keep),
     schedule: { ...current.schedule, ...defined(schedule) },
     preferences: { ...current.preferences, ...defined(preferences) },
     habits: habits.filter((h) => keep(h.name)),
+    blocks: mergeBlocks(current.blocks, args.busy_blocks).filter((b) => keep(b.label)),
     instructions: cleanText(args.instructions, 1000) ?? current.instructions,
     summary: summary.length ? summary : current.summary,
     memory: memory.filter((m) => keep(m.text)),

@@ -16,7 +16,7 @@ const MAX_MESSAGE_LENGTH = 2000;
 // POST /api/onboarding
 //   { messages: ChatMessage[], today: "YYYY-MM-DD", mode?: "onboarding" | "update" }
 // Requires "Authorization: Bearer <supabase access token>".
-// Uses the separate onboarding budget (not the 10 daily questions). What the
+// Creating the persona never uses the 10 daily AI messages. What the
 // AI learns is saved straight away; the response is its next question.
 export async function POST(request: Request) {
   const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");

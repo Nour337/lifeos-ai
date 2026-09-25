@@ -2,6 +2,10 @@ import type { TaskPriority } from "@/types/task";
 
 // Shapes shared by the coaching API (/api/coach) and the screens.
 
+// How a request was counted: Persona AI (unlimited) or one of the 10
+// daily AI messages
+export type Usage = { persona: true } | { persona: false; remaining: number };
+
 export type Suggestion = {
   id: string;
   title: string;

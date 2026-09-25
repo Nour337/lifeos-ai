@@ -6,8 +6,11 @@ import { WEEKDAYS, type Pattern, type Weekday } from "@/lib/assistant/patterns";
 import {
   INTEREST_OPTIONS,
   newId,
+  ROLE_OPTIONS,
   type AIProfile,
+  type BusyBlock,
   type Habit,
+  type Role,
 } from "@/types/persona";
 
 // Edit forms used by the "My AI Profile" page. Each takes the current
@@ -28,7 +31,7 @@ function Actions({ onCancel, saving, label = "Save" }: { onCancel: () => void; s
 
 // ---------------------------------------------------------------- about
 
-export type AboutValues = { name: string } & AIProfile["about"];
+export type AboutValues = { name: string; roles: Role[]; headline: string; age_range: string };
 
 export function AboutForm({
   initial,
@@ -42,8 +45,11 @@ export function AboutForm({
   onCancel: () => void;
 }) {
   const [v, setV] = useState(initial);
-  const set = (key: keyof AboutValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setV((prev) => ({ ...prev, [key]: e.target.value }));
+  const toggleRole = (role: Role) =>
+    setV((prev) => ({
+      ...prev,
+      roles: prev.roles.includes(role) ? prev.roles.filter((r) => r !== role) : [...prev.roles, role],
+    }));
 
   return (
     <form
@@ -54,36 +60,150 @@ export function AboutForm({
       className="space-y-4"
     >
       <Field label="What should the AI call you?">
-        {(id) => <Input id={id} value={v.name} onChange={set("name")} maxLength={50} placeholder="e.g. Nour" />}
+        {(id) => (
+          <Input id={id} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} maxLength={50} placeholder="e.g. Nour" />
+        )}
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="You are a...">
-          {(id) => (
-            <Select id={id} value={v.occupation ?? ""} onChange={set("occupation")}>
-              <option value="">Not set</option>
-              <option value="student">Student</option>
-              <option value="employee">Employee</option>
-              <option value="entrepreneur">Entrepreneur</option>
-              <option value="freelancer">Freelancer</option>
-              <option value="other">Something else</option>
-            </Select>
-          )}
-        </Field>
-        <Field label="Role">
-          {(id) => <Input id={id} value={v.role ?? ""} onChange={set("role")} maxLength={80} placeholder="Engineering student" />}
-        </Field>
+      <div>
+        <p className="mb-1.5 text-sm font-medium text-ink">Your roles (pick all that apply)</p>
+        <div className="flex flex-wrap gap-2">
+          {ROLE_OPTIONS.map((r) => (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => toggleRole(r.value)}
+              aria-pressed={v.roles.includes(r.value)}
+              className={`rounded-full border px-3.5 py-2 text-sm font-medium transition ${
+                v.roles.includes(r.value)
+                  ? "border-accent bg-accent text-white"
+                  : "border-line text-ink hover:border-accent/40"
+              }`}
+            >
+              {r.emoji} {r.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <Field label="University, company or business">
-        {(id) => <Input id={id} value={v.organization ?? ""} onChange={set("organization")} maxLength={100} />}
+      <Field label="In one line, who are you?">
+        {(id) => (
+          <Input
+            id={id}
+            value={v.headline}
+            onChange={(e) => setV({ ...v, headline: e.target.value })}
+            maxLength={100}
+            placeholder="e.g. Engineering student & junior developer"
+          />
+        )}
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Field">
-          {(id) => <Input id={id} value={v.field ?? ""} onChange={set("field")} maxLength={100} placeholder="Engineering" />}
+      <Field label="Age range (optional)">
+        {(id) => (
+          <Select id={id} value={v.age_range} onChange={(e) => setV({ ...v, age_range: e.target.value })}>
+            <option value="">Prefer not to say</option>
+            {["Under 18", "18-24", "25-34", "35-44", "45-54", "55+"].map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      <Actions onCancel={onCancel} saving={saving} />
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- text fields (education, work)
+
+export function FieldsForm<T extends Record<string, string | undefined>>({
+  fields,
+  initial,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  fields: { key: keyof T & string; label: string; placeholder?: string; long?: boolean }[];
+  initial: T;
+  saving: boolean;
+  onSave: (values: T) => void;
+  onCancel: () => void;
+}) {
+  const [v, setV] = useState<Record<string, string>>(
+    Object.fromEntries(fields.map((f) => [f.key, initial[f.key] ?? ""]))
+  );
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(
+          Object.fromEntries(
+            Object.entries(v).map(([k, value]) => [k, value.trim() || undefined])
+          ) as T
+        );
+      }}
+      className="space-y-4"
+    >
+      {fields.map((f) => (
+        <Field key={f.key} label={f.label}>
+          {(id) =>
+            f.long ? (
+              <Textarea
+                id={id}
+                rows={3}
+                maxLength={400}
+                value={v[f.key]}
+                onChange={(e) => setV({ ...v, [f.key]: e.target.value })}
+                placeholder={f.placeholder}
+              />
+            ) : (
+              <Input
+                id={id}
+                maxLength={150}
+                value={v[f.key]}
+                onChange={(e) => setV({ ...v, [f.key]: e.target.value })}
+                placeholder={f.placeholder}
+              />
+            )
+          }
         </Field>
-        <Field label="Year / term">
-          {(id) => <Input id={id} value={v.term ?? ""} onChange={set("term")} maxLength={60} placeholder="Last term" />}
-        </Field>
-      </div>
+      ))}
+      <Actions onCancel={onCancel} saving={saving} />
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- lists (business, skills)
+
+export function ListsForm<K extends string>({
+  lists,
+  initial,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  lists: { key: K; label: string; placeholder: string }[];
+  initial: Record<K, string[]>;
+  saving: boolean;
+  onSave: (values: Record<K, string[]>) => void;
+  onCancel: () => void;
+}) {
+  const [v, setV] = useState(initial);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(v);
+      }}
+      className="space-y-4"
+    >
+      {lists.map((l) => (
+        <ChipInput
+          key={l.key}
+          label={l.label}
+          values={v[l.key]}
+          onChange={(next) => setV({ ...v, [l.key]: next })}
+          placeholder={l.placeholder}
+        />
+      ))}
       <Actions onCancel={onCancel} saving={saving} />
     </form>
   );
@@ -160,13 +280,12 @@ export function InterestsForm({
   onSave,
   onCancel,
 }: {
-  initial: { interests: string[]; skills: string[] };
+  initial: string[];
   saving: boolean;
-  onSave: (values: { interests: string[]; skills: string[] }) => void;
+  onSave: (interests: string[]) => void;
   onCancel: () => void;
 }) {
-  const [interests, setInterests] = useState(initial.interests);
-  const [skills, setSkills] = useState(initial.skills);
+  const [interests, setInterests] = useState(initial);
   const custom = interests.filter((i) => !INTEREST_OPTIONS.includes(i));
   const toggle = (o: string) =>
     setInterests((p) => (p.includes(o) ? p.filter((x) => x !== o) : [...p, o]));
@@ -175,41 +294,32 @@ export function InterestsForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSave({ interests, skills });
+        onSave(interests);
       }}
       className="space-y-4"
     >
-      <div>
-        <p className="mb-1.5 text-sm font-medium text-ink">Interests</p>
-        <div className="flex flex-wrap gap-1.5">
-          {INTEREST_OPTIONS.map((o) => (
-            <button
-              key={o}
-              type="button"
-              onClick={() => toggle(o)}
-              aria-pressed={interests.includes(o)}
-              className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
-                interests.includes(o)
-                  ? "border-accent bg-accent text-white"
-                  : "border-line text-ink hover:border-accent/40"
-              }`}
-            >
-              {o}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-wrap gap-1.5">
+        {INTEREST_OPTIONS.map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => toggle(o)}
+            aria-pressed={interests.includes(o)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+              interests.includes(o)
+                ? "border-accent bg-accent text-white"
+                : "border-line text-ink hover:border-accent/40"
+            }`}
+          >
+            {o}
+          </button>
+        ))}
       </div>
       <ChipInput
         label="Other interests"
         values={custom}
         onChange={(next) => setInterests([...interests.filter((i) => INTEREST_OPTIONS.includes(i)), ...next])}
         placeholder="e.g. Public speaking"
-      />
-      <ChipInput
-        label="Skills you want to develop"
-        values={skills}
-        onChange={setSkills}
-        placeholder="e.g. Python, n8n, Sales"
       />
       <Actions onCancel={onCancel} saving={saving} />
     </form>
@@ -506,6 +616,68 @@ export function InstructionsForm({
         )}
       </Field>
       <Actions onCancel={onCancel} saving={saving} />
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- busy hours
+
+export function BlockForm({
+  initial,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  initial: BusyBlock | null;
+  saving: boolean;
+  onSave: (block: BusyBlock) => void;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [days, setDays] = useState<Weekday[]>(initial?.days ?? ["sun", "mon", "tue", "wed", "thu"]);
+  const [start, setStart] = useState(initial?.start ?? "09:00");
+  const [end, setEnd] = useState(initial?.end ?? "17:00");
+  const valid = label.trim() && days.length > 0 && start < end;
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!valid) return;
+        onSave({ id: initial?.id ?? newId(), label: label.trim(), days, start, end });
+      }}
+      className="space-y-4"
+    >
+      <Field label="What is it?">
+        {(id) => (
+          <Input id={id} value={label} onChange={(e) => setLabel(e.target.value)} required maxLength={40} placeholder="e.g. Work, University" autoFocus={!initial} />
+        )}
+      </Field>
+      <div className="flex gap-1.5" role="group" aria-label="Days">
+        {WEEKDAYS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => setDays((p) => (p.includes(d) ? p.filter((x) => x !== d) : [...p, d]))}
+            aria-pressed={days.includes(d)}
+            className={`h-10 flex-1 rounded-xl text-sm font-semibold transition ${
+              days.includes(d) ? "bg-accent text-white" : "bg-surface-2 text-muted"
+            }`}
+          >
+            {DAY_LABELS[d]}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="From">
+          {(id) => <Input id={id} type="time" value={start} onChange={(e) => setStart(e.target.value)} required />}
+        </Field>
+        <Field label="To">
+          {(id) => <Input id={id} type="time" value={end} onChange={(e) => setEnd(e.target.value)} required />}
+        </Field>
+      </div>
+      {start >= end && <p className="text-sm text-danger">The end time must be after the start time.</p>}
+      <Actions onCancel={onCancel} saving={saving || !valid} label={initial ? "Save" : "Add busy hours"} />
     </form>
   );
 }

@@ -11,10 +11,21 @@ export function sectionStatus(
   const covered = new Set(profile.covered);
   const has = (key: SectionKey, filled: boolean) => filled || covered.has(key);
   return {
-    about: has("about", !!(profile.about.role || profile.about.occupation)),
-    education: has("education", projects.some((p) => p.kind === "course")),
-    work: has("work", projects.some((p) => p.kind !== "course")),
-    interests: has("interests", profile.interests.length > 0 || profile.skills.length > 0),
+    about: has("about", profile.about.roles.length > 0 || !!profile.about.headline),
+    education: has(
+      "education",
+      projects.some((p) => p.kind === "course") || Object.keys(profile.education).length > 0
+    ),
+    work: has(
+      "work",
+      projects.some((p) => p.kind !== "course") ||
+        Object.keys(profile.work).length > 0 ||
+        profile.business.ideas.length > 0
+    ),
+    interests: has(
+      "interests",
+      profile.interests.length > 0 || profile.skills.length > 0 || profile.tools.length > 0
+    ),
     goals: has("goals", goals.length > 0),
     schedule: has(
       "schedule",

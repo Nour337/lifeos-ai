@@ -87,7 +87,7 @@ See `supabase/migrations/`.
 | id                | uuid  | = auth.users.id; created by a trigger on signup |
 | display_name      | text  |                                               |
 | ai_personality    | text  | friendly / direct / coach / professional / teacher / balanced |
-| ai_profile        | jsonb | the AI persona: about, interests, skills, schedule, preferences, habits, instructions, summary, memory, ignored suggestion areas, covered onboarding sections (see `types/persona.ts`) |
+| ai_profile        | jsonb | the AI persona: about (roles as a list: student + working + entrepreneur...), education, work, business, interests, skills, tools, tech stack, learning, schedule, busy blocks, preferences, habits, instructions, summary, memory, ignored suggestion areas, covered onboarding sections (see `types/persona.ts`) |
 | onboarding_status | text  | pending (show onboarding) / skipped / done    |
 
 ### weekly_reviews
@@ -98,9 +98,20 @@ See `supabase/migrations/`.
 | review     | jsonb | stats + AI text (`WeeklyReview` in `lib/persona/types.ts`) |
 
 ### ai_usage_extra
-Separate small daily budgets that don't use the 10 questions:
-onboarding 40, suggest 5, review 3. `consume_extra_ai_credit(kind)`
-(security definer) is the only writer.
+Counters for AI that does NOT use the 10 daily messages:
+- `persona`: Persona Mode (persona chat, suggestions, "what now", planning,
+  weekly reviews, subtasks) once the user has a persona
+- `onboarding`: creating / updating the persona
+
+These are "unlimited" for normal use; `consume_extra_ai_credit(kind)`
+(security definer, the only writer) only enforces a fair-use ceiling
+(persona 300/day, onboarding 200/day) against scripts and abuse.
+
+## AI usage rule
+- Normal AI chat: 10 messages per user per day (`consume_ai_credit`).
+- Persona AI: unlimited once `personaActive(profile)` is true
+  (onboarding done and the persona says who the user is).
+  Without a persona, persona-powered features fall back to the 10/day.
 
 ## Key Decision Log
 - Deviated from roadmap: used `projects.goal_id` instead of

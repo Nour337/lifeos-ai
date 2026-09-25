@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabaseClient";
 import { addDays, minutesToTime, timeToMinutes, toLocalDateString } from "@/utils/date";
 import type { NowStep, Suggestion } from "@/lib/persona/types";
-import type { AIProfile } from "@/types/persona";
+import { blocksOn, type AIProfile, type BusyBlock } from "@/types/persona";
 import type { Task } from "@/types/task";
 
 // Turning AI suggestions and "do this now" plans into real, timed tasks.
@@ -9,17 +9,20 @@ import type { Task } from "@/types/task";
 const DEFAULT_MINUTES = 30;
 const LATEST_END = 23 * 60 + 30;
 
-function busyBlocks(tasks: Task[], date: string) {
-  return tasks
-    .filter((t) => t.due_date === date && t.due_time && t.status !== "done" && t.status !== "skipped")
-    .map((t) => {
-      const start = timeToMinutes(t.due_time!);
-      const end = t.end_time
-        ? timeToMinutes(t.end_time)
-        : start + (t.estimated_duration ?? DEFAULT_MINUTES);
-      return { start, end: Math.max(end, start + 1) };
-    })
-    .sort((a, b) => a.start - b.start);
+// Timed tasks plus fixed busy blocks (work, university) on that date
+function busyBlocks(tasks: Task[], date: string, fixed: BusyBlock[] = []) {
+  return [
+    ...tasks
+      .filter((t) => t.due_date === date && t.due_time && t.status !== "done" && t.status !== "skipped")
+      .map((t) => {
+        const start = timeToMinutes(t.due_time!);
+        const end = t.end_time
+          ? timeToMinutes(t.end_time)
+          : start + (t.estimated_duration ?? DEFAULT_MINUTES);
+        return { start, end: Math.max(end, start + 1) };
+      }),
+    ...blocksOn(fixed, date).map((b) => ({ start: timeToMinutes(b.start), end: timeToMinutes(b.end) })),
+  ].sort((a, b) => a.start - b.start);
 }
 
 // First free gap of `length` minutes on `date` between `from` and `until`,
@@ -29,9 +32,10 @@ export function findSlot(
   date: string,
   from: number,
   length: number,
-  until = LATEST_END
+  until = LATEST_END,
+  fixed: BusyBlock[] = []
 ): number | null {
-  const busy = busyBlocks(tasks, date);
+  const busy = busyBlocks(tasks, date, fixed);
   let candidate = Math.ceil(from / 15) * 15;
   for (let guard = 0; guard < 200; guard++) {
     if (candidate + length > until) return null;
@@ -64,7 +68,7 @@ export function nextFreeSlot(
   for (let i = 0; i < 7; i++) {
     const date = addDays(today, i);
     const from = i === 0 ? Math.max(nowMinutes, window.start) : window.start;
-    const slot = findSlot(tasks, date, from, length, window.end);
+    const slot = findSlot(tasks, date, from, length, window.end, profile?.blocks ?? []);
     if (slot !== null) return { date, time: minutesToTime(slot) };
   }
   return null;

@@ -7,7 +7,7 @@ export type ChatMessage = { role: "user" | "assistant"; content: string };
 export type ConflictChoice = "move_new" | "move_existing" | "keep_both" | "skip";
 
 export type Conflict = {
-  existingTaskId: string;
+  existingTaskId: string | null; // null = a fixed busy block (work, university)
   existingTitle: string;
   existingStart: string; // "HH:MM"
   existingEnd: string;
@@ -29,6 +29,7 @@ export type DraftTask = {
   projectId: string | null;
   milestoneKey: string | null; // link to a milestone project created by this proposal
   conflict: Conflict | null;
+  movedFrom: string | null; // "15:30 (Work)": the app moved it out of fixed busy hours
 };
 
 export type TaskChange = {
@@ -58,6 +59,7 @@ export type Proposal = {
 export type AssistantResponse = {
   reply: string;
   proposal: Proposal | null;
-  remembered?: string[]; // facts saved to the user's AI memory
-  remaining?: number;
+  remembered?: string[]; // persona changes the AI saved
+  remaining?: number; // normal chat only
+  persona?: boolean; // answered in (unlimited) Persona Mode
 };

@@ -1,4 +1,4 @@
-import { parsePattern, type Pattern } from "@/lib/assistant/patterns";
+import { parsePattern, WEEKDAYS, type Pattern, type Weekday } from "@/lib/assistant/patterns";
 
 // The user's AI profile ("persona"). Courses and work live in the projects
 // table and goals in the goals table; everything else the AI should know is
@@ -94,6 +94,16 @@ export type Habit = {
   duration: number | null; // minutes
 };
 
+// Fixed weekly busy time (university, work shifts). The AI never plans
+// inside these, and the app flags any task that overlaps one.
+export type BusyBlock = {
+  id: string;
+  label: string; // "University", "Work"
+  days: Weekday[];
+  start: string; // "HH:MM"
+  end: string;
+};
+
 export type MemoryItem = {
   id: string;
   text: string;
@@ -101,16 +111,49 @@ export type MemoryItem = {
   created_at: string;
 };
 
+// A person can be several things at once: student + working + entrepreneur.
+export type Role = "student" | "working" | "entrepreneur" | "freelancer" | "other";
+
+export const ROLE_OPTIONS: { value: Role; label: string; emoji: string }[] = [
+  { value: "student", label: "Student", emoji: "🎓" },
+  { value: "working", label: "Working", emoji: "💼" },
+  { value: "entrepreneur", label: "Entrepreneur", emoji: "🚀" },
+  { value: "freelancer", label: "Freelancer", emoji: "💻" },
+  { value: "other", label: "Something else", emoji: "✨" },
+];
+
+export function roleOf(role: Role) {
+  return ROLE_OPTIONS.find((r) => r.value === role) ?? ROLE_OPTIONS[ROLE_OPTIONS.length - 1];
+}
+
 export type AIProfile = {
   about: {
-    role?: string; // "Engineering student"
-    occupation?: string; // student / employee / entrepreneur / freelancer / other
-    organization?: string;
-    field?: string;
-    term?: string;
+    roles: Role[];
+    headline?: string; // "Engineering student & junior developer"
+    age_range?: string; // only if the user wants to share it
+  };
+  education: {
+    university?: string;
+    faculty?: string;
+    major?: string;
+    term?: string; // "Last term", "3rd year"
+    graduation?: string; // "June 2027" or YYYY-MM-DD
+  };
+  work: {
+    job?: string;
+    company?: string;
+    hours?: string; // "Sun-Thu 16:00-22:00"
+    responsibilities?: string;
+  };
+  business: {
+    ideas: string[];
+    interests: string[]; // SaaS, agencies, e-commerce...
   };
   interests: string[];
-  skills: string[];
+  skills: string[]; // skills they want to develop
+  tools: string[]; // tools/technologies they want to learn (n8n, Make...)
+  tech_stack: string[]; // technologies they already use
+  learning: string[]; // courses or topics they want to take
   schedule: {
     wake?: string; // "HH:MM"
     sleep?: string;
@@ -128,6 +171,7 @@ export type AIProfile = {
     free_time?: string; // "at least 2 hours a day"
   };
   habits: Habit[];
+  blocks: BusyBlock[];
   instructions: string;
   summary: string[]; // the AI's short description of the user
   memory: MemoryItem[];
@@ -144,12 +188,19 @@ export type Profile = {
 };
 
 export const EMPTY_PROFILE: AIProfile = {
-  about: {},
+  about: { roles: [] },
+  education: {},
+  work: {},
+  business: { ideas: [], interests: [] },
   interests: [],
   skills: [],
+  tools: [],
+  tech_stack: [],
+  learning: [],
   schedule: {},
   preferences: {},
   habits: [],
+  blocks: [],
   instructions: "",
   summary: [],
   memory: [],
@@ -217,25 +268,101 @@ export function parseHabit(v: unknown): Habit | null {
   };
 }
 
+export function parseBlock(v: unknown): BusyBlock | null {
+  const b = record(v);
+  const label = cleanText(b.label, 40);
+  const start = cleanTime(b.start);
+  const end = cleanTime(b.end);
+  const days = (Array.isArray(b.days) ? b.days : [])
+    .map((d) => String(d).toLowerCase().slice(0, 3))
+    .filter((d, i, all): d is Weekday => (WEEKDAYS as readonly string[]).includes(d) && all.indexOf(d) === i);
+  if (!label || !start || !end || start >= end || !days.length) return null;
+  return { id: cleanText(b.id, 20) ?? newId(), label, days, start, end };
+}
+
+// New busy blocks replace existing ones with the same label
+export function mergeBlocks(current: BusyBlock[], raw: unknown): BusyBlock[] {
+  const next = [...current];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const block = parseBlock(item);
+    if (!block) continue;
+    const i = next.findIndex((b) => b.label.toLowerCase() === block.label.toLowerCase());
+    if (i >= 0) next[i] = { ...block, id: next[i].id };
+    else next.push(block);
+  }
+  return next.slice(0, 15);
+}
+
+// Busy blocks that apply on a date (YYYY-MM-DD)
+export function blocksOn(blocks: BusyBlock[], date: string): BusyBlock[] {
+  const [y, m, d] = date.split("-").map(Number);
+  const weekday = WEEKDAYS[(new Date(y, m - 1, d).getDay() + 6) % 7];
+  return blocks.filter((b) => b.days.includes(weekday));
+}
+
+export function describeDays(days: Weekday[]): string {
+  const order = WEEKDAYS.filter((d) => days.includes(d));
+  if (order.length === 7) return "Every day";
+  const name = (i: number) => WEEKDAYS[i][0].toUpperCase() + WEEKDAYS[i].slice(1);
+  const idx = order.map((d) => WEEKDAYS.indexOf(d));
+  // A run of 3+ days reads better as a range, also across the week end: "Sun–Thu"
+  if (idx.length > 2) {
+    const set = new Set(idx);
+    for (const start of idx) {
+      if (idx.every((_, k) => set.has((start + k) % 7))) {
+        return `${name(start)}–${name((start + idx.length - 1) % 7)}`;
+      }
+    }
+  }
+  return idx.map(name).join(", ");
+}
+
 // Anything read from the database or sent by the AI goes through here, so
 // the rest of the app can trust the shape.
 export function parseAIProfile(raw: unknown): AIProfile {
   const p = record(raw);
   const about = record(p.about);
+  const education = record(p.education);
+  const work = record(p.work);
+  const business = record(p.business);
   const schedule = record(p.schedule);
   const prefs = record(p.preferences);
   const ignored = record(p.ignored);
 
+  const roles = parseRoles(about.roles ?? about.occupation);
+  // Older profiles kept organization / field / term in "about"
+  const isStudent = roles.includes("student");
+
   return {
-    about: compact({
-      role: cleanText(about.role, 80),
-      occupation: cleanText(about.occupation, 40),
-      organization: cleanText(about.organization, 100),
-      field: cleanText(about.field, 100),
-      term: cleanText(about.term, 60),
+    about: {
+      roles,
+      ...compact({
+        headline: cleanText(about.headline ?? about.role, 100),
+        age_range: cleanText(about.age_range, 20),
+      }),
+    },
+    education: compact({
+      university: cleanText(education.university ?? (isStudent ? about.organization : undefined), 100),
+      faculty: cleanText(education.faculty, 100),
+      major: cleanText(education.major ?? about.field, 100),
+      term: cleanText(education.term ?? about.term, 60),
+      graduation: cleanText(education.graduation, 40),
     }),
+    work: compact({
+      job: cleanText(work.job, 100),
+      company: cleanText(work.company ?? (!isStudent ? about.organization : undefined), 100),
+      hours: cleanText(work.hours, 150),
+      responsibilities: cleanText(work.responsibilities, 400),
+    }),
+    business: {
+      ideas: cleanList(business.ideas, 15, 150),
+      interests: cleanList(business.interests),
+    },
     interests: cleanList(p.interests),
     skills: cleanList(p.skills),
+    tools: cleanList(p.tools),
+    tech_stack: cleanList(p.tech_stack),
+    learning: cleanList(p.learning, 20, 100),
     schedule: compact({
       wake: cleanTime(schedule.wake),
       sleep: cleanTime(schedule.sleep),
@@ -256,6 +383,10 @@ export function parseAIProfile(raw: unknown): AIProfile {
       .map(parseHabit)
       .filter((h): h is Habit => !!h)
       .slice(0, 20),
+    blocks: (Array.isArray(p.blocks) ? p.blocks : [])
+      .map(parseBlock)
+      .filter((b): b is BusyBlock => !!b)
+      .slice(0, 15),
     instructions: cleanText(p.instructions, 1000) ?? "",
     summary: cleanList(p.summary, 12, 160),
     memory: (Array.isArray(p.memory) ? p.memory : [])
@@ -283,6 +414,38 @@ export function parseAIProfile(raw: unknown): AIProfile {
         SECTIONS.some((s) => s.key === k) && all.indexOf(k) === i
     ),
   };
+}
+
+const ROLE_ALIASES: Record<string, Role> = {
+  student: "student",
+  working: "working",
+  employee: "working",
+  work: "working",
+  job: "working",
+  entrepreneur: "entrepreneur",
+  business: "entrepreneur",
+  founder: "entrepreneur",
+  freelancer: "freelancer",
+  freelance: "freelancer",
+  other: "other",
+};
+
+export function parseRoles(v: unknown): Role[] {
+  const list = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
+  const roles: Role[] = [];
+  for (const item of list) {
+    const role = ROLE_ALIASES[String(item).trim().toLowerCase()];
+    if (role && !roles.includes(role)) roles.push(role);
+  }
+  return roles;
+}
+
+// Persona Mode is on once the user has a persona: onboarding finished and
+// at least something that says who they are.
+export function personaActive(profile: Pick<Profile, "onboarding_status" | "ai_profile"> | null): boolean {
+  if (!profile || profile.onboarding_status !== "done") return false;
+  const p = profile.ai_profile;
+  return p.about.roles.length > 0 || !!p.about.headline || p.summary.length > 0;
 }
 
 export function parseStyle(v: unknown): AIStyle {

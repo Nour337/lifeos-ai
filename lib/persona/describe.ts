@@ -1,4 +1,11 @@
-import { describePattern, IMPORTANCE_LABELS, styleOf, type Profile } from "@/types/persona";
+import {
+  describeDays,
+  describePattern,
+  IMPORTANCE_LABELS,
+  roleOf,
+  styleOf,
+  type Profile,
+} from "@/types/persona";
 import { kindOf } from "@/types/project";
 import type { Area, Insight } from "@/lib/persona/insights";
 
@@ -38,19 +45,48 @@ export function describePersona(profile: Profile | null, insights: Insight[] = [
   if (!profile) return "No profile yet.";
   const p = profile.ai_profile;
   const lines: string[] = [];
-  const about = [
-    p.about.role,
-    p.about.occupation,
-    p.about.field && `field: ${p.about.field}`,
-    p.about.organization && `at ${p.about.organization}`,
-    p.about.term && `term/year: ${p.about.term}`,
-  ].filter(Boolean);
+  const list = (items: (string | false | undefined)[]) => items.filter(Boolean).join(", ");
+  const education = list([
+    p.education.major && `studies ${p.education.major}`,
+    p.education.faculty && `faculty: ${p.education.faculty}`,
+    p.education.university && `at ${p.education.university}`,
+    p.education.term && `term/year: ${p.education.term}`,
+    p.education.graduation && `graduates ${p.education.graduation}`,
+  ]);
+  const work = list([
+    p.work.job && `works as ${p.work.job}`,
+    p.work.company && `at ${p.work.company}`,
+    p.work.hours && `work hours: ${p.work.hours}`,
+    p.work.responsibilities && `responsibilities: ${p.work.responsibilities}`,
+  ]);
 
   if (profile.display_name) lines.push(`Name: ${profile.display_name}`);
-  if (about.length) lines.push(`About: ${about.join(", ")}`);
+  if (p.about.roles.length) {
+    lines.push(
+      `Roles (all at the same time): ${p.about.roles.map((r) => roleOf(r).label).join(" + ")}${
+        p.about.headline ? ` — ${p.about.headline}` : ""
+      }`
+    );
+  } else if (p.about.headline) {
+    lines.push(`About: ${p.about.headline}`);
+  }
+  if (p.about.age_range) lines.push(`Age range: ${p.about.age_range}`);
+  if (education) lines.push(`Education: ${education}`);
+  if (work) lines.push(`Work: ${work}`);
+  if (p.business.ideas.length || p.business.interests.length) {
+    lines.push(
+      `Business: ${list([
+        p.business.interests.length && `interested in ${p.business.interests.join(", ")}`,
+        p.business.ideas.length && `ideas: ${p.business.ideas.join("; ")}`,
+      ] as (string | false)[])}`
+    );
+  }
   if (p.summary.length) lines.push(`Summary: ${p.summary.join("; ")}`);
   if (p.interests.length) lines.push(`Interests: ${p.interests.join(", ")}`);
   if (p.skills.length) lines.push(`Skills to develop: ${p.skills.join(", ")}`);
+  if (p.tools.length) lines.push(`Tools they want to learn: ${p.tools.join(", ")}`);
+  if (p.tech_stack.length) lines.push(`Technologies they use: ${p.tech_stack.join(", ")}`);
+  if (p.learning.length) lines.push(`Want to learn / take: ${p.learning.join(", ")}`);
 
   const s = p.schedule;
   const schedule = [
@@ -63,6 +99,12 @@ export function describePersona(profile: Profile | null, insights: Insight[] = [
     s.daily_hours !== undefined && `realistic ${s.daily_hours}h/day for goals`,
   ].filter(Boolean);
   if (schedule.length) lines.push(`Schedule: ${schedule.join("; ")}`);
+  const busy = p.blocks.length
+    ? p.blocks.map((b) => `${b.label} ${describeDays(b.days)} ${b.start}-${b.end}`)
+    : [s.busy, p.work.hours && `work ${p.work.hours}`].filter(Boolean);
+  if (busy.length) {
+    lines.push(`BUSY, never schedule anything during: ${busy.join("; ")} (check the weekday of every date)`);
+  }
 
   const pr = p.preferences;
   const prefs = [

@@ -73,11 +73,11 @@ export async function applyProposal(
       start = draft.conflict.suggestedStart;
       end = end ? minutesToTime(timeToMinutes(end) + shift) : null;
     }
-    if (choice === "move_existing" && draft.conflict?.suggestedStart) {
+    if (choice === "move_existing" && draft.conflict?.suggestedStart && draft.conflict.existingTaskId) {
       const c = draft.conflict;
       const length = timeToMinutes(c.existingEnd) - timeToMinutes(c.existingStart);
       moveExisting.push({
-        id: c.existingTaskId,
+        id: c.existingTaskId!,
         start: c.suggestedStart!,
         end: minutesToTime(timeToMinutes(c.suggestedStart!) + length),
       });

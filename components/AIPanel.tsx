@@ -31,9 +31,11 @@ const timeOptions = [
 export default function AIPanel({
   tasks,
   onToggle,
+  personaActive = false,
 }: {
   tasks: Task[];
   onToggle: (task: Task) => void;
+  personaActive?: boolean;
 }) {
   const { user, session } = useAuth();
   const [loadingMode, setLoadingMode] = useState<Mode | null>(null);
@@ -54,7 +56,8 @@ export default function AIPanel({
   }, []);
 
   const hasOpenTasks = tasks.some(isOpen);
-  const outOfCredits = creditsLeft === 0;
+  // With a persona, planning is unlimited Persona AI
+  const outOfCredits = !personaActive && creditsLeft === 0;
 
   const ask = async (mode: Mode) => {
     if (!session) return;
@@ -149,12 +152,18 @@ export default function AIPanel({
         </p>
       )}
 
-      {creditsLeft !== null && (
-        <p className={`text-center text-xs ${outOfCredits ? "text-danger" : "text-muted"}`}>
-          {outOfCredits
-            ? `You've used today's ${AI_DAILY_LIMIT} AI questions. More tomorrow!`
-            : `${creditsLeft} of ${AI_DAILY_LIMIT} AI questions left today`}
+      {personaActive ? (
+        <p className="text-center text-xs text-muted">
+          🧠 Persona AI · unlimited planning
         </p>
+      ) : (
+        creditsLeft !== null && (
+          <p className={`text-center text-xs ${outOfCredits ? "text-danger" : "text-muted"}`}>
+            {outOfCredits
+              ? `You've reached your ${AI_DAILY_LIMIT} AI messages for today.`
+              : `AI messages today: ${AI_DAILY_LIMIT - creditsLeft} / ${AI_DAILY_LIMIT}`}
+          </p>
+        )
       )}
 
       {error && (

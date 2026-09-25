@@ -16,7 +16,18 @@ import type {
 import { describePersona, styleInstruction } from "@/lib/persona/describe";
 import { computeInsights } from "@/lib/persona/insights";
 import { toProfile } from "@/lib/persona/server";
-import { cleanText, newId, type Profile } from "@/types/persona";
+import {
+  blocksOn,
+  cleanText,
+  newId,
+  mergeBlocks,
+  parseAIProfile,
+  parseRoles,
+  record,
+  ROLE_OPTIONS,
+  roleOf,
+  type Profile,
+} from "@/types/persona";
 import { kindOf } from "@/types/project";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
@@ -36,7 +47,8 @@ export type Context = {
   localTime: string;
   name: string | null;
   profile: Profile;
-  persona: string; // the user's AI profile as prompt text
+  personaMode: boolean; // Persona chat (unlimited) vs normal chat (10/day)
+  persona: string; // the user's AI persona as prompt text ("" in normal chat)
   tasks: Task[];
   goals: Goal[];
   projects: Project[];
@@ -50,7 +62,8 @@ export async function loadContext(
   supabase: SupabaseClient,
   userId: string,
   today: string,
-  localTime: string
+  localTime: string,
+  personaMode: boolean
 ): Promise<Context> {
   const from = addDays(today, -7);
   const to = addDays(today, 60);
@@ -92,7 +105,8 @@ export async function loadContext(
     localTime,
     name: userProfile.display_name,
     profile: userProfile,
-    persona: describePersona(userProfile, computeInsights(tasks, today)),
+    personaMode,
+    persona: personaMode ? describePersona(userProfile, computeInsights(tasks, today)) : "",
     tasks,
     goals: goals.data as Goal[],
     projects: projects.data as Project[],
@@ -121,7 +135,11 @@ function refOf<T>(map: Map<string, T>, value: T | undefined): string | null {
 function describeContext(ctx: Context): string {
   const calendar = Array.from({ length: 60 }, (_, i) => {
     const date = addDays(ctx.today, i);
-    return `${date} ${weekdayName(date)}`;
+    // Busy blocks written on each day, so the AI doesn't have to work out weekdays
+    const fixed = blocksOn(ctx.profile.ai_profile.blocks, date)
+      .map((b) => `${b.label} ${b.start}-${b.end}`)
+      .join(", ");
+    return `${date} ${weekdayName(date)}${fixed ? ` [busy: ${fixed}]` : ""}`;
   }).join(", ");
 
   const goalLines = [...ctx.goalRef]
@@ -157,7 +175,9 @@ function describeContext(ctx: Context): string {
   return [
     `Today is ${ctx.today} (${weekdayName(ctx.today)}), local time ${ctx.localTime}.`,
     ctx.name ? `The user's name is ${ctx.name}.` : "",
-    `\nWhat you know about the user (use it to personalise plans and suggestions):\n${ctx.persona}`,
+    ctx.persona
+      ? `\nThe user's AI Persona (who they are, what they do, what they want; use it for everything):\n${ctx.persona}`
+      : "",
     `\nCalendar for the next 60 days: ${calendar}`,
     `\nGoals:\n${goalLines || "(none)"}`,
     `\nCourses and projects:\n${projectLines || "(none)"}`,
@@ -188,13 +208,18 @@ Scheduling rules:
 - Missed tasks ("I didn't go to the gym today"): propose marking it skipped (or moving it) and shifting the following sessions in that routine by the same amount, keeping the pattern. Moved tasks get status "rescheduled".
 - "Move all unfinished tasks to tomorrow": update every open task dated today or earlier.
 - Refer to existing items only by their reference, like t3, g1, p2.
-- Link study tasks to their course (project ref) and work to its project, so progress is tracked.
+- Link study tasks to their course (project ref) and work to its project, so progress is tracked.`;
 
-Personal coaching:
+// Added in Persona Mode only
+const PERSONA_PROMPT = `Persona Mode: you are this user's personal planner and coach and you know their persona.
 - Use what you know about the user: their courses, exams, projects, goals, schedule, routines, preferences and learned behaviour. Respect their sleep time, busy hours and routines, and follow learned behaviour (e.g. no early-morning tasks if they rarely do them; shorter sessions if long ones fail).
 - "I have 2 hours free": suggest 2-3 concrete options from their goals and deadlines and ask which one. If they say "you decide", propose a balanced plan for that time with propose_changes.
 - "Plan my week" / "create a balanced plan": spread sessions over the week across their important areas (deadlines first), keeping free time and routines.
-- When the user tells you a lasting fact useful for planning ("I work night shifts", "I have gym Mon/Wed/Fri", "my exam moved to Dec 20"), call remember with a short sentence. Don't remember one-off requests.`;
+- The user can have several roles at once (student + working + entrepreneur). Balance them: university deadlines, work and business goals all get time.
+- Every calendar day lists its [busy: ...] times (work, university). Never schedule inside them; use the free gaps (before or after work, days off) and respect sleep time.
+- When they tell you fixed weekly hours ("I work Sun-Thu 16-22", "uni 9 to 3"), also save them as busy_blocks in update_persona.
+- Suggest useful tasks from their persona (courses, exams, work, business ideas, AI/tech learning, goals), prioritised by deadlines and goals, never random, each with a one-line reason.
+- When the user tells you something lasting about themselves, call update_persona in the same reply: new roles ("I started working" → roles = their current roles + working), job/company/hours, university details, new interests, skills, tools, courses to take, business ideas, or other facts ("I work night shifts on Fridays", "my exam moved to Dec 20"). Don't save one-off requests.`;
 
 // Fields shared by one-off tasks and repeating series
 const taskFields = {
@@ -315,17 +340,61 @@ const TOOL = {
   },
 };
 
-const REMEMBER_TOOL = {
+const PERSONA_TOOL = {
   type: "function",
   function: {
-    name: "remember",
-    description: "Save lasting facts about the user to their AI profile (visible and editable in My AI Profile).",
+    name: "update_persona",
+    description:
+      "Update the user's AI Persona with lasting information (visible and editable on the My AI Persona page).",
     parameters: {
       type: "object",
       properties: {
-        facts: { type: "array", items: { type: "string" }, description: "Short sentences." },
+        roles: {
+          type: "array",
+          items: { type: "string", enum: ROLE_OPTIONS.map((r) => r.value) },
+          description: "The COMPLETE new list of roles, only if it changed.",
+        },
+        headline: { type: "string" },
+        education: {
+          type: "object",
+          properties: {
+            university: { type: "string" },
+            faculty: { type: "string" },
+            major: { type: "string" },
+            term: { type: "string" },
+            graduation: { type: "string" },
+          },
+        },
+        job: {
+          type: "object",
+          properties: {
+            job: { type: "string" },
+            company: { type: "string" },
+            hours: { type: "string" },
+            responsibilities: { type: "string" },
+          },
+        },
+        add_interests: { type: "array", items: { type: "string" } },
+        add_skills: { type: "array", items: { type: "string" } },
+        add_tools: { type: "array", items: { type: "string" } },
+        add_learning: { type: "array", items: { type: "string" } },
+        add_business_ideas: { type: "array", items: { type: "string" } },
+        busy_blocks: {
+          type: "array",
+          description: "Fixed weekly busy times: university hours, work shifts. Replaces blocks with the same label.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: 'e.g. "University", "Work"' },
+              days: { type: "array", items: { type: "string", enum: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] } },
+              start: { type: "string", description: "HH:MM" },
+              end: { type: "string", description: "HH:MM" },
+            },
+            required: ["label", "days", "start", "end"],
+          },
+        },
+        facts: { type: "array", items: { type: "string" }, description: "Other lasting facts, short sentences." },
       },
-      required: ["facts"],
     },
   },
 };
@@ -335,7 +404,7 @@ type ToolArgs = Record<string, unknown>;
 export async function askAssistant(
   ctx: Context,
   history: ChatMessage[]
-): Promise<{ text: string; args: ToolArgs | null; remember: string[] }> {
+): Promise<{ text: string; args: ToolArgs | null; personaUpdate: ToolArgs | null }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new AIError("The AI assistant isn't set up yet (OPENAI_API_KEY is missing).", 503);
@@ -351,11 +420,13 @@ export async function askAssistant(
         messages: [
           {
             role: "system",
-            content: `${SYSTEM_PROMPT}\n- ${styleInstruction(ctx.profile)}\n\n${describeContext(ctx)}`,
+            content: ctx.personaMode
+              ? `${SYSTEM_PROMPT}\n\n${PERSONA_PROMPT}\n- ${styleInstruction(ctx.profile)}\n\n${describeContext(ctx)}`
+              : `${SYSTEM_PROMPT}\n\n${describeContext(ctx)}`,
           },
           ...history.slice(-HISTORY_LIMIT),
         ],
-        tools: [TOOL, REMEMBER_TOOL],
+        tools: ctx.personaMode ? [TOOL, PERSONA_TOOL] : [TOOL],
         tool_choice: "auto",
         temperature: 0.3,
         max_tokens: 3000,
@@ -390,46 +461,107 @@ export async function askAssistant(
     }
   }
 
-  const remember: string[] = [];
-  for (const c of message.tool_calls ?? []) {
-    if (c.function?.name !== "remember") continue;
+  let personaUpdate: ToolArgs | null = null;
+  const personaCall = message.tool_calls?.find(
+    (c: { function?: { name?: string } }) => c.function?.name === "update_persona"
+  );
+  if (personaCall && ctx.personaMode) {
     try {
-      const facts = JSON.parse(c.function.arguments)?.facts;
-      for (const f of Array.isArray(facts) ? facts : []) {
-        const text = cleanText(f, 200);
-        if (text) remember.push(text);
-      }
+      personaUpdate = JSON.parse(personaCall.function.arguments);
     } catch {
-      // a broken memory note isn't worth failing the reply for
+      // a broken persona update isn't worth failing the reply for
     }
   }
-  return { text: (message.content ?? "").trim(), args, remember: remember.slice(0, 5) };
+  return { text: (message.content ?? "").trim(), args, personaUpdate };
 }
 
-// Adds new facts to the user's AI memory. Returns the facts actually added.
-export async function saveMemory(
+// Applies an update_persona call. Returns short descriptions of what
+// changed, shown under the reply ("Added role: Working").
+export async function savePersonaUpdate(
   supabase: SupabaseClient,
   ctx: Context,
-  facts: string[]
+  update: ToolArgs
 ): Promise<string[]> {
-  const profile = ctx.profile.ai_profile;
-  const known = new Set(profile.memory.map((m) => m.text.toLowerCase()));
-  const added = facts.filter((f) => !known.has(f.toLowerCase()));
-  if (!added.length) return [];
+  const current = ctx.profile.ai_profile;
+  const changes: string[] = [];
   const now = new Date().toISOString();
-  const memory = [
-    ...profile.memory,
-    ...added.map((text) => ({ id: newId(), text, source: "ai" as const, created_at: now })),
-  ].slice(-50);
+
+  const addTo = (list: string[], raw: unknown, label: string) => {
+    const next = [...list];
+    for (const item of Array.isArray(raw) ? raw : []) {
+      const text = cleanText(item, 150);
+      if (text && !next.some((x) => x.toLowerCase() === text.toLowerCase())) {
+        next.push(text);
+        changes.push(`${label}: ${text}`);
+      }
+    }
+    return next;
+  };
+  const merge = <T extends Record<string, unknown>>(base: T, raw: unknown, label: string): T => {
+    const out: Record<string, unknown> = { ...base };
+    for (const [key, value] of Object.entries(record(raw))) {
+      const text = cleanText(value, 300);
+      if (text && out[key] !== text) {
+        out[key] = text;
+        changes.push(`${label}: ${text}`);
+      }
+    }
+    return out as T;
+  };
+
+  let roles = current.about.roles;
+  if (update.roles !== undefined) {
+    const next = parseRoles(update.roles);
+    if (next.length) {
+      next.filter((r) => !roles.includes(r)).forEach((r) => changes.push(`Added role: ${roleOf(r).label}`));
+      roles.filter((r) => !next.includes(r)).forEach((r) => changes.push(`Removed role: ${roleOf(r).label}`));
+      roles = next;
+    }
+  }
+  const headline = cleanText(update.headline, 100);
+  if (headline && headline !== current.about.headline) changes.push(`About: ${headline}`);
+
+  const blocks = mergeBlocks(current.blocks, update.busy_blocks);
+  blocks
+    .filter((b) => !current.blocks.some((c) => c.id === b.id && c.start === b.start && c.end === b.end))
+    .forEach((b) => changes.push(`Busy: ${b.label} ${b.start}–${b.end}`));
+
+  const memory = [...current.memory];
+  for (const fact of Array.isArray(update.facts) ? update.facts : []) {
+    const text = cleanText(fact, 200);
+    if (text && !memory.some((m) => m.text.toLowerCase() === text.toLowerCase())) {
+      memory.push({ id: newId(), text, source: "ai", created_at: now });
+      changes.push(text);
+    }
+  }
+
+  const next = parseAIProfile({
+    ...current,
+    about: { ...current.about, roles, headline: headline ?? current.about.headline },
+    education: merge(current.education, update.education, "Education"),
+    work: merge(current.work, update.job, "Work"),
+    interests: addTo(current.interests, update.add_interests, "Interest"),
+    skills: addTo(current.skills, update.add_skills, "Skill"),
+    tools: addTo(current.tools, update.add_tools, "Tool to learn"),
+    learning: addTo(current.learning, update.add_learning, "To learn"),
+    business: {
+      ...current.business,
+      ideas: addTo(current.business.ideas, update.add_business_ideas, "Business idea"),
+    },
+    blocks,
+    memory: memory.slice(-50),
+  });
+
+  if (!changes.length) return [];
   const { error } = await supabase
     .from("profiles")
-    .update({ ai_profile: { ...profile, memory }, updated_at: now })
+    .update({ ai_profile: next, updated_at: now })
     .eq("id", ctx.profile.id);
   if (error) {
-    console.error("Saving memory failed:", error.message);
+    console.error("Saving persona update failed:", error.message);
     return [];
   }
-  return added;
+  return changes.slice(0, 8);
 }
 
 // ---------------------------------------------------------------- proposal
@@ -503,7 +635,7 @@ export function buildProposal(args: ToolArgs, ctx: Context): Proposal | null {
   const creates: DraftTask[] = [];
   const push = (fields: ReturnType<typeof base>, day: string) => {
     if (!fields.title || day < ctx.today || creates.length >= MAX_CREATES) return;
-    creates.push({ key: `n${creates.length}`, date: day, conflict: null, ...fields });
+    creates.push({ key: `n${creates.length}`, date: day, conflict: null, movedFrom: null, ...fields });
   };
 
   for (const raw of array(args.tasks)) {
@@ -584,7 +716,7 @@ export function buildProposal(args: ToolArgs, ctx: Context): Proposal | null {
 
 // ---------------------------------------------------------------- conflicts
 
-type Block = { start: number; end: number; taskId?: string; title?: string };
+type Block = { start: number; end: number; taskId?: string; title?: string; fixed?: boolean };
 
 function taskBlock(start: string, end: string | null, duration: number | null): { start: number; end: number } {
   const s = timeToMinutes(start);
@@ -601,8 +733,24 @@ function markConflicts(proposal: Proposal, ctx: Context) {
   const removed = new Set(proposal.deletes.map((d) => d.taskId));
   const moved = new Map(proposal.updates.map((u) => [u.taskId, u]));
 
-  // Existing schedule as it will look after the proposed updates
+  // Existing schedule as it will look after the proposed updates, plus the
+  // user's fixed busy blocks (university, work)
   const busy = new Map<string, Block[]>();
+  const blocks = ctx.profile.ai_profile.blocks;
+  const dayBusy = (day: string): Block[] => {
+    if (!busy.has(day)) {
+      busy.set(
+        day,
+        blocksOn(blocks, day).map((b) => ({
+          start: timeToMinutes(b.start),
+          end: timeToMinutes(b.end),
+          title: b.label,
+          fixed: true,
+        }))
+      );
+    }
+    return busy.get(day)!;
+  };
   for (const task of ctx.tasks) {
     if (removed.has(task.id) || task.status === "done" || task.status === "skipped") continue;
     const change = moved.get(task.id)?.after;
@@ -614,35 +762,59 @@ function markConflicts(proposal: Proposal, ctx: Context) {
       change?.end_time ?? hhmm(task.end_time),
       change?.estimated_duration ?? task.estimated_duration
     );
-    busy.set(day, [...(busy.get(day) ?? []), { ...block, taskId: task.id, title: task.title }]);
+    dayBusy(day).push({ ...block, taskId: task.id, title: task.title });
   }
+
+  // The user's day: from an hour after waking to half an hour before bed
+  const schedule = ctx.profile.ai_profile.schedule;
+  const dayStart = schedule.wake ? timeToMinutes(schedule.wake) + 60 : 8 * 60;
+  const sleep = schedule.sleep ? timeToMinutes(schedule.sleep) : null;
+  const dayEnd = sleep && sleep > 12 * 60 ? sleep - 30 : 24 * 60;
 
   for (const draft of proposal.creates) {
     if (!draft.start) continue;
-    const block = taskBlock(draft.start, draft.end, draft.duration);
-    const dayBusy = busy.get(draft.date) ?? [];
-    const clash = dayBusy.find((b) => b.taskId && overlaps(b, block));
+    let block = taskBlock(draft.start, draft.end, draft.duration);
+    const today = dayBusy(draft.date);
+
+    // Work and university can't move, so a new task inside them is moved to
+    // the nearest free time that day (after the busy block, else earlier)
+    const fixedClash = today.find((b) => b.fixed && overlaps(b, block));
+    if (fixedClash) {
+      const length = block.end - block.start;
+      const slot =
+        findFreeSlot(today, fixedClash.end, length, dayEnd) ??
+        findFreeSlot(today, dayStart, length, dayEnd);
+      if (slot) {
+        const shift = timeToMinutes(slot) - block.start;
+        draft.movedFrom = `${draft.start} (${fixedClash.title})`;
+        draft.start = slot;
+        if (draft.end) draft.end = minutesToTime(timeToMinutes(draft.end) + shift);
+        block = taskBlock(draft.start, draft.end, draft.duration);
+      }
+    }
+
+    const clash = today.find((b) => (b.taskId || b.fixed) && overlaps(b, block));
 
     if (clash) {
       const length = block.end - block.start;
       draft.conflict = {
-        existingTaskId: clash.taskId!,
+        existingTaskId: clash.taskId ?? null,
         existingTitle: clash.title!,
         existingStart: minutesToTime(clash.start),
         existingEnd: minutesToTime(clash.end),
-        suggestedStart: findFreeSlot(dayBusy, clash.end, length),
+        suggestedStart: findFreeSlot(today, clash.end, length),
       } satisfies Conflict;
     }
     // Later new tasks must also avoid this one
-    busy.set(draft.date, [...dayBusy, block]);
+    today.push(block);
   }
 }
 
-function findFreeSlot(dayBusy: Block[], from: number, length: number): string | null {
+function findFreeSlot(dayBusy: Block[], from: number, length: number, until = 24 * 60): string | null {
   const sorted = [...dayBusy].sort((a, b) => a.start - b.start);
   let candidate = Math.ceil(from / 15) * 15; // round to quarter hours
   for (let guard = 0; guard < 100; guard++) {
-    if (candidate + length > 24 * 60) return null;
+    if (candidate + length > until) return null;
     const hit = sorted.find((b) => overlaps(b, { start: candidate, end: candidate + length }));
     if (!hit) return minutesToTime(candidate);
     candidate = Math.ceil(hit.end / 15) * 15;

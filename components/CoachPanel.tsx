@@ -46,7 +46,7 @@ export default function CoachPanel({ tasks }: { tasks: Task[] }) {
       // With options ("I have free time"), let the user choose first
       setShowPlan(data.result.options.length === 0);
       setShowFree(false);
-      if (data.remaining !== undefined) announceCredits(data.remaining);
+      if (data.usage && !data.usage.persona) announceCredits(data.usage.remaining);
     } catch (e) {
       setError((e as Error).message);
     } finally {

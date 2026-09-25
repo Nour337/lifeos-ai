@@ -1,5 +1,5 @@
-import { AIError, consumeCredit, getUserSession } from "@/lib/ai/planDay";
-import { consumeExtraCredit, loadPersona } from "@/lib/persona/server";
+import { AIError, getUserSession } from "@/lib/ai/planDay";
+import { consumeUsage, loadPersona } from "@/lib/persona/server";
 import { planNow, reviewWeek, suggestTasks } from "@/lib/persona/coach";
 import type { WeeklyReview } from "@/lib/persona/types";
 
@@ -11,8 +11,8 @@ const TIME_PATTERN = /^\d{2}:\d{2}$/;
 //   { mode: "now", today, localTime, minutes?, exclude? }    -> { result }
 //   { mode: "review", today, localTime, weekStart }          -> { review }
 // Requires "Authorization: Bearer <supabase access token>".
-// "now" uses one of the 10 daily questions; suggestions and reviews have
-// their own small daily budgets.
+// With an active persona these are unlimited Persona AI; without one each
+// uses one of the 10 daily AI messages. Every response includes `usage`.
 export async function POST(request: Request) {
   const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!accessToken) {
@@ -41,10 +41,10 @@ export async function POST(request: Request) {
     const { supabase, userId } = await getUserSession(accessToken);
 
     if (body.mode === "suggest") {
-      const remaining = await consumeExtraCredit(supabase, "suggest");
       const data = await loadPersona(supabase, userId, today);
+      const usage = await consumeUsage(supabase, data.profile);
       const suggestions = await suggestTasks(data, today, localTime);
-      return Response.json({ suggestions, remaining });
+      return Response.json({ suggestions, usage });
     }
 
     if (body.mode === "now") {
@@ -54,10 +54,10 @@ export async function POST(request: Request) {
         .filter((x): x is string => typeof x === "string")
         .map((x) => x.slice(0, 120))
         .slice(0, 10);
-      const remaining = await consumeCredit(supabase);
       const data = await loadPersona(supabase, userId, today);
+      const usage = await consumeUsage(supabase, data.profile);
       const result = await planNow(data, today, localTime, minutes, exclude);
-      return Response.json({ result, remaining });
+      return Response.json({ result, usage });
     }
 
     if (body.mode === "review") {
@@ -68,7 +68,6 @@ export async function POST(request: Request) {
       const [y, m, d] = weekStart.split("-").map(Number);
       const previousStart = new Date(Date.UTC(y, m - 1, d - 7)).toISOString().slice(0, 10);
 
-      const remaining = await consumeExtraCredit(supabase, "review");
       const [data, previous] = await Promise.all([
         loadPersona(supabase, userId, today),
         supabase
@@ -77,6 +76,7 @@ export async function POST(request: Request) {
           .eq("week_start", previousStart)
           .maybeSingle(),
       ]);
+      const usage = await consumeUsage(supabase, data.profile);
       const before = (previous.data?.review as WeeklyReview | undefined)?.stats?.progress ?? null;
       const review = await reviewWeek(data, weekStart, today, localTime, before);
 
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
         .from("weekly_reviews")
         .upsert({ user_id: userId, week_start: weekStart, review }, { onConflict: "user_id,week_start" });
       if (error) console.error("Saving review failed:", error.message);
-      return Response.json({ review, remaining });
+      return Response.json({ review, usage });
     }
 
     return Response.json({ error: "Unknown mode." }, { status: 400 });

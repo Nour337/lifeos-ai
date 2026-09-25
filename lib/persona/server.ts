@@ -1,13 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { AIError } from "@/lib/ai/planDay";
+import { AIError, consumeCredit } from "@/lib/ai/planDay";
 import { computeAreas, computeInsights, type Area, type Insight } from "@/lib/persona/insights";
 import { addDays } from "@/utils/date";
 import {
   parseAIProfile,
   parseStyle,
+  personaActive,
   type OnboardingStatus,
   type Profile,
 } from "@/types/persona";
+import type { Usage } from "@/lib/persona/types";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
 import type { Task } from "@/types/task";
@@ -85,23 +87,50 @@ export async function loadPersona(
   };
 }
 
-// Consumes one of the separate (non-chat) AI budgets. Returns what's left.
+// Persona AI and onboarding don't use the 10 daily messages. Their
+// counters only enforce a high fair-use ceiling against abuse.
 export async function consumeExtraCredit(
   supabase: SupabaseClient,
-  kind: "onboarding" | "suggest" | "review"
+  kind: "onboarding" | "persona"
 ): Promise<number> {
   const { data, error } = await supabase.rpc("consume_extra_ai_credit", { credit_kind: kind });
   if (error) {
     console.error("consume_extra_ai_credit failed:", error.message);
-    throw new AIError("Couldn't check your AI limit. Try again.", 500);
+    throw new AIError("Couldn't check your AI usage. Try again.", 500);
   }
   if (data === -1) {
-    const what = {
-      onboarding: "setup messages",
-      suggest: "suggestion refreshes",
-      review: "weekly review refreshes",
-    }[kind];
-    throw new AIError(`You've reached today's limit of ${what}. Try again tomorrow!`, 429);
+    throw new AIError(
+      "You've reached today's fair-use limit for Persona AI. It resets tomorrow.",
+      429
+    );
   }
   return data as number;
+}
+
+export type { Usage };
+
+// The core usage rule: with an active persona the request is unlimited
+// (Persona Mode); without one it uses one of the 10 daily AI messages.
+export async function consumeUsage(
+  supabase: SupabaseClient,
+  profile: Profile
+): Promise<Usage> {
+  if (personaActive(profile)) {
+    await consumeExtraCredit(supabase, "persona");
+    return { persona: true };
+  }
+  return { persona: false, remaining: await consumeCredit(supabase) };
+}
+
+export async function loadProfile(supabase: SupabaseClient, userId: string): Promise<Profile> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("display_name, ai_personality, ai_profile, onboarding_status")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) {
+    console.error("loadProfile failed:", error.message);
+    throw new AIError("Couldn't load your profile.", 500);
+  }
+  return toProfile(userId, data);
 }

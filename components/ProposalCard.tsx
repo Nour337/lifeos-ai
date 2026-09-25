@@ -199,10 +199,13 @@ function DraftRow({
         <span className="w-24 shrink-0 text-xs tabular-nums text-muted">{time}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-ink">{draft.title}</span>
       </div>
+      {draft.movedFrom && (
+        <p className="mt-1 pl-[7.1rem] text-xs text-muted">↪ Moved from {draft.movedFrom}</p>
+      )}
       {c && (
         <div className="mt-2 pl-4">
           <p className="text-xs text-warn">
-            ⚠️ Overlaps “{c.existingTitle}” ({c.existingStart}–{c.existingEnd})
+            ⚠️ Overlaps {c.existingTaskId ? "" : "your "}“{c.existingTitle}” ({c.existingStart}–{c.existingEnd})
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {c.suggestedStart && (
@@ -210,13 +213,13 @@ function DraftRow({
                 Move this to {c.suggestedStart}
               </Choice>
             )}
-            {c.suggestedStart && (
+            {c.suggestedStart && c.existingTaskId && (
               <Choice active={choice === "move_existing"} disabled={locked} onClick={() => onChoose("move_existing")}>
                 Move “{c.existingTitle}” to {c.suggestedStart}
               </Choice>
             )}
             <Choice active={choice === "keep_both"} disabled={locked} onClick={() => onChoose("keep_both")}>
-              Keep both
+              {c.existingTaskId ? "Keep both" : "Keep this time"}
             </Choice>
             <Choice active={choice === "skip"} disabled={locked} onClick={() => onChoose("skip")}>
               Don&apos;t add

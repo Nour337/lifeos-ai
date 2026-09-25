@@ -143,7 +143,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
               className={`flex h-10 w-10 items-center justify-center rounded-full bg-surface shadow-card transition hover:text-ink ${
                 isActive("/profile") ? "text-accent" : "text-muted"
               }`}
-              aria-label="My AI profile"
+              aria-label="My AI Persona"
             >
               <UserIcon className="h-5 w-5" />
             </Link>

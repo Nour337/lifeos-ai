@@ -3,7 +3,6 @@ import {
   askAI,
   buildPrompt,
   buildStepsPrompt,
-  consumeCredit,
   getOpenTasks,
   getTask,
   getUserSession,
@@ -12,7 +11,11 @@ import {
   parseSteps,
 } from "@/lib/ai/planDay";
 import { describePersona } from "@/lib/persona/describe";
-import { toProfile } from "@/lib/persona/server";
+import { consumeUsage, loadProfile, type Usage } from "@/lib/persona/server";
+import { personaActive } from "@/types/persona";
+
+// Older screens read `remaining`; it's only there for normal (non-persona) use
+const remainingOf = (usage: Usage) => (usage.persona ? {} : { remaining: usage.remaining });
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
@@ -21,7 +24,8 @@ const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
 //   { mode: "plan" | "next", today: "YYYY-MM-DD", localTime: "HH:MM", availableMinutes?: number }
 //   { mode: "steps", taskId: "<uuid>" }
 // Requires "Authorization: Bearer <supabase access token>".
-// Every AI answer uses one of the user's daily credits (see consume_ai_credit).
+// With an active persona this is unlimited Persona AI; otherwise every answer
+// uses one of the 10 daily AI messages (see consume_ai_credit).
 export async function POST(request: Request) {
   const accessToken = request.headers
     .get("authorization")
@@ -50,10 +54,13 @@ export async function POST(request: Request) {
       if (!body.taskId || !UUID_PATTERN.test(body.taskId)) {
         return Response.json({ error: "Missing task." }, { status: 400 });
       }
-      const task = await getTask(supabase, body.taskId);
-      const remaining = await consumeCredit(supabase);
+      const [task, profile] = await Promise.all([
+        getTask(supabase, body.taskId),
+        loadProfile(supabase, userId),
+      ]);
+      const usage = await consumeUsage(supabase, profile);
       const raw = await askAI(buildStepsPrompt(task));
-      return Response.json({ result: parseSteps(raw, task.id), remaining });
+      return Response.json({ result: parseSteps(raw, task.id), usage, ...remainingOf(usage) });
     }
 
     const mode = body.mode === "next" ? "next" : "plan";
@@ -78,18 +85,14 @@ export async function POST(request: Request) {
       });
     }
 
-    const remaining = await consumeCredit(supabase);
-    const { data: profileRow } = await supabase
-      .from("profiles")
-      .select("display_name, ai_personality, ai_profile, onboarding_status")
-      .eq("id", userId)
-      .maybeSingle();
-    const persona = profileRow ? describePersona(toProfile(userId, profileRow)) : "";
+    const profile = await loadProfile(supabase, userId);
+    const usage = await consumeUsage(supabase, profile);
+    const persona = personaActive(profile) ? describePersona(profile) : "";
     const raw = await askAI(
       buildPrompt(mode, tasks, today, localTime, availableMinutes, persona)
     );
     const result = mode === "next" ? parseNext(raw, tasks) : parsePlan(raw, tasks);
-    return Response.json({ result, remaining });
+    return Response.json({ result, usage, ...remainingOf(usage) });
   } catch (error) {
     if (error instanceof AIError) {
       return Response.json({ error: error.message }, { status: error.status });

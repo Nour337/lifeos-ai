@@ -8,6 +8,7 @@ import { recordIgnored } from "@/lib/queries/persona";
 import { deleteTask } from "@/lib/queries/tasks";
 import { notifyTasksChanged } from "@/lib/QuickAdd";
 import { useToast } from "@/components/Toast";
+import { announceCredits } from "@/components/AIPanel";
 import { Skeleton, Spinner } from "@/components/ui";
 import { SparklesIcon } from "@/components/icons";
 import { formatDate, formatDuration } from "@/utils/date";
@@ -36,17 +37,20 @@ function writeCache(userId: string, cache: Cache) {
   }
 }
 
-// Proactive task ideas from the user's persona. Generated once a day
-// automatically (own small budget, not the 10 daily questions), kept for
-// the day, and refreshable.
+// Proactive task ideas from the user's persona. With an active persona
+// they're unlimited Persona AI and load automatically once a day; without
+// one, each refresh uses one of the 10 daily AI messages, so nothing loads
+// until the user asks.
 export default function SuggestionsCard({
   tasks,
   profile,
   today,
+  personaActive,
 }: {
   tasks: Task[];
   profile: AIProfile | null;
   today: string;
+  personaActive: boolean;
 }) {
   const { user, session } = useAuth();
   const toast = useToast();
@@ -78,6 +82,7 @@ export default function SuggestionsCard({
         ...nowFields(),
       });
       update({ date: today, items: data.suggestions, handled: [] });
+      if (data.usage && !data.usage.persona) announceCredits(data.usage.remaining);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -88,10 +93,10 @@ export default function SuggestionsCard({
   // No suggestions yet today: fetch them once
   const autoLoaded = useRef(false);
   useEffect(() => {
-    if (cache || autoLoaded.current || !session) return;
+    if (cache || autoLoaded.current || !session || !personaActive) return;
     autoLoaded.current = true;
     load();
-  }, [cache, session, load]);
+  }, [cache, session, load, personaActive]);
 
   const handle = (id: string) =>
     cache && update({ ...cache, handled: [...cache.handled, id] });
@@ -139,11 +144,16 @@ export default function SuggestionsCard({
   return (
     <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold text-ink">
+        <h2 className="flex flex-wrap items-center gap-2 font-semibold text-ink">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-grad-from to-grad-to text-white">
             <SparklesIcon className="h-4 w-4" />
           </span>
           AI Suggestions
+          {personaActive && (
+            <span className="rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-ok">
+              🧠 Persona · unlimited
+            </span>
+          )}
         </h2>
         <button
           onClick={load}
@@ -165,7 +175,11 @@ export default function SuggestionsCard({
         <p className="rounded-xl bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>
       ) : visible.length === 0 ? (
         <p className="py-3 text-center text-sm text-muted">
-          {cache?.items.length ? "All done with today's suggestions 🎉" : "No suggestions yet."}
+          {cache?.items.length
+            ? "All done with today's suggestions 🎉"
+            : personaActive
+              ? "No suggestions yet."
+              : "Tap Refresh for ideas based on your goals (uses 1 AI message). Create your persona for unlimited, automatic suggestions."}
         </p>
       ) : (
         <ul className="space-y-2.5">

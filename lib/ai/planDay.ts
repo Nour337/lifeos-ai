@@ -83,7 +83,7 @@ export async function consumeCredit(supabase: SupabaseClient): Promise<number> {
   }
   if (data === -1) {
     throw new AIError(
-      `You've used all ${AI_DAILY_LIMIT} AI questions for today. More tomorrow!`,
+      `You've reached your ${AI_DAILY_LIMIT} AI messages for today. Your Persona AI is still unlimited, and your tasks work as usual.`,
       429
     );
   }

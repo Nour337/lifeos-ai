@@ -17,9 +17,12 @@ import ProjectForm from "@/components/ProjectForm";
 import GoalForm from "@/components/GoalForm";
 import {
   AboutForm,
+  BlockForm,
+  FieldsForm,
   HabitForm,
   InstructionsForm,
   InterestsForm,
+  ListsForm,
   ScheduleForm,
   type AboutValues,
   type ScheduleValues,
@@ -29,40 +32,81 @@ import { BrainIcon, PencilIcon, PlusIcon, SparklesIcon, TrashIcon } from "@/comp
 import { formatDate, minutesToTime, timeToMinutes, toLocalDateString } from "@/utils/date";
 import {
   AI_STYLES,
+  describeDays,
   describePattern,
   IMPORTANCE_LABELS,
   newId,
+  personaActive,
+  roleOf,
   SECTIONS,
   styleOf,
   type AIProfile,
   type AIStyle,
+  type BusyBlock,
   type Habit,
   type Profile,
 } from "@/types/persona";
-import { kindOf, type Project } from "@/types/project";
+import { kindOf, type Project, type ProjectKind } from "@/types/project";
 import type { Goal } from "@/types/goal";
 import type { Task } from "@/types/task";
 
 type Editing =
   | { kind: "about" }
+  | { kind: "education" }
+  | { kind: "work" }
+  | { kind: "business" }
+  | { kind: "skills" }
   | { kind: "interests" }
   | { kind: "schedule" }
   | { kind: "instructions" }
   | { kind: "habit"; habit: Habit | null }
-  | { kind: "project"; project: Project | null; defaultKind: "course" | "project" }
+  | { kind: "block"; block: BusyBlock | null }
+  | { kind: "project"; project: Project | null; defaultKind: ProjectKind }
   | { kind: "goal"; goal: Goal | null };
 
 const EDIT_TITLES: Record<Editing["kind"], string> = {
   about: "About me",
-  interests: "Interests & skills",
+  education: "Education",
+  work: "Work",
+  business: "Business",
+  skills: "Skills & learning",
+  interests: "Interests",
   schedule: "Schedule & preferences",
   instructions: "Custom instructions",
   habit: "Routine",
+  block: "Busy hours",
   project: "Course or project",
   goal: "Goal",
 };
 
-export default function ProfilePage() {
+const EDUCATION_FIELDS = [
+  { key: "university", label: "University", placeholder: "e.g. Cairo University" },
+  { key: "faculty", label: "Faculty", placeholder: "e.g. Faculty of Engineering" },
+  { key: "major", label: "Major", placeholder: "e.g. Computer Engineering" },
+  { key: "term", label: "Current year / term", placeholder: "e.g. Last term" },
+  { key: "graduation", label: "Graduation date", placeholder: "e.g. June 2027" },
+] as const;
+
+const WORK_FIELDS = [
+  { key: "job", label: "Job", placeholder: "e.g. Junior developer" },
+  { key: "company", label: "Company or business", placeholder: "e.g. Acme" },
+  { key: "hours", label: "Working hours", placeholder: "e.g. Sun–Thu 16:00–22:00" },
+  { key: "responsibilities", label: "Responsibilities", placeholder: "What you do at work", long: true },
+] as const;
+
+const SKILL_LISTS = [
+  { key: "skills", label: "Skills you want to develop", placeholder: "e.g. Sales, Python" },
+  { key: "tools", label: "Tools you want to learn", placeholder: "e.g. n8n, Make" },
+  { key: "tech_stack", label: "Technologies you use", placeholder: "e.g. React, Excel" },
+  { key: "learning", label: "Courses or topics you want to take", placeholder: "e.g. AI agents course" },
+] as const;
+
+const BUSINESS_LISTS = [
+  { key: "ideas", label: "Business ideas", placeholder: "e.g. AI automation agency for clinics" },
+  { key: "interests", label: "Business interests", placeholder: "e.g. SaaS, e-commerce" },
+] as const;
+
+export default function PersonaPage() {
   const { user } = useAuth();
   const toast = useToast();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -93,7 +137,7 @@ export default function ProfilePage() {
 
   const insights = useMemo(() => computeInsights(tasks, toLocalDateString()), [tasks]);
 
-  // Save part of the profile, then show the saved version
+  // Save part of the persona, then show the saved version
   const save = async (
     changes: { display_name?: string | null; ai_personality?: AIStyle; ai_profile?: AIProfile },
     message = "Saved. Your AI will use this from now on."
@@ -146,7 +190,7 @@ export default function ProfilePage() {
   if (!profile) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-28 rounded-2xl" />
+        <Skeleton className="h-40 rounded-2xl" />
         <Skeleton className="h-40 rounded-2xl" />
         <Skeleton className="h-40 rounded-2xl" />
       </div>
@@ -154,29 +198,71 @@ export default function ProfilePage() {
   }
 
   const ai = profile.ai_profile;
+  const active = personaActive(profile);
   const courses = projects.filter((p) => p.kind === "course");
   const work = projects.filter((p) => p.kind !== "course");
   const status = sectionStatus(ai, projects, goals);
   const done = Object.values(status).filter(Boolean).length;
   const style = styleOf(profile.ai_personality);
   const name = profile.display_name ?? user?.email?.split("@")[0] ?? "You";
-  const subtitle = [ai.about.role, ai.about.organization].filter(Boolean).join(" · ");
   const ignoredAreas = Object.entries(ai.ignored).filter(([, n]) => n > 0);
+  const openProject = (project: Project | null, defaultKind: ProjectKind) =>
+    setEditing({ kind: "project", project, defaultKind });
+
+  // Summary chips: roles, then main interests, then goals
+  const chips = [
+    ...ai.about.roles.map((r) => `${roleOf(r).emoji} ${roleOf(r).label}`),
+    ...ai.interests.slice(0, 3).map((i) => `💡 ${i}`),
+    ...goals.slice(0, 3).map((g) => `🎯 ${g.name}`),
+  ];
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Summary */}
       <section className="overflow-hidden rounded-2xl bg-hero p-5 text-hero-ink shadow-card">
         <div className="flex items-center gap-4">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-grad-from to-grad-to text-2xl font-bold text-white">
             {name.slice(0, 1).toUpperCase()}
           </span>
           <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-wider opacity-60">My AI Persona</p>
             <h1 className="truncate text-2xl font-bold tracking-tight">{name}</h1>
-            <p className="truncate text-sm opacity-75">{subtitle || "Tell your AI about yourself"}</p>
+            {ai.about.headline && <p className="truncate text-sm opacity-75">{ai.about.headline}</p>}
           </div>
         </div>
-        <div className="mt-4 flex items-center gap-2 text-sm">
+
+        {chips.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {chips.map((c) => (
+              <span key={c} className="rounded-full bg-white/10 px-3 py-1 text-sm">
+                {c}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div
+          className={`mt-4 flex items-center gap-3 rounded-xl px-3 py-2.5 ${
+            active ? "bg-ok/20" : "bg-white/10"
+          }`}
+        >
+          <BrainIcon className="h-5 w-5 shrink-0" />
+          <div className="min-w-0 flex-1 text-sm">
+            {active ? (
+              <>
+                <p className="font-semibold">Persona Active ✓</p>
+                <p className="opacity-75">Unlimited Persona AI: planning, suggestions and the Persona chat don&apos;t use your 10 daily messages.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">Persona not active yet</p>
+                <p className="opacity-75">Finish your persona to unlock unlimited Persona AI.</p>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 text-sm">
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/15">
             <div
               className="h-full rounded-full bg-gradient-to-r from-grad-from to-grad-to transition-all"
@@ -187,16 +273,16 @@ export default function ProfilePage() {
             {done}/{SECTIONS.length} known
           </span>
         </div>
+
         <Link
-          href="/onboarding?mode=update"
+          href={active ? "/onboarding?mode=update" : "/onboarding"}
           className="mt-4 flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-grad-from to-grad-to font-semibold text-white shadow-lg shadow-black/20 transition hover:brightness-110"
         >
           <SparklesIcon className="h-4 w-4" />
-          Update AI knowledge
+          {active ? "Update my persona" : "Create my persona"}
         </Link>
       </section>
 
-      {/* How the AI sees you */}
       <Section title="How your AI sees you" emoji="🧠">
         {ai.summary.length ? (
           <ul className="space-y-1.5">
@@ -208,10 +294,10 @@ export default function ProfilePage() {
             ))}
           </ul>
         ) : (
-          <Empty text="Your AI writes a short summary of you after onboarding." />
+          <Empty text="Your AI writes a short summary of you when your persona is created." />
         )}
         <p className="mt-3 text-xs text-muted">
-          This isn&apos;t fixed. Edit anything below, or tap “Update AI knowledge” and just tell your AI what changed.
+          Your persona isn&apos;t fixed. Edit anything below, or just tell the Persona chat what changed (“I started working”).
         </p>
       </Section>
 
@@ -219,21 +305,29 @@ export default function ProfilePage() {
         <Facts
           items={[
             ["Name", profile.display_name],
-            ["Role", ai.about.role],
-            ["You are a", ai.about.occupation],
-            ["At", ai.about.organization],
-            ["Field", ai.about.field],
-            ["Year / term", ai.about.term],
+            ["Roles", ai.about.roles.map((r) => `${roleOf(r).emoji} ${roleOf(r).label}`).join("  ")],
+            ["Who I am", ai.about.headline],
+            ["Age range", ai.about.age_range],
+          ]}
+        />
+      </Section>
+
+      <Section title="Education" emoji="🎓" onEdit={() => setEditing({ kind: "education" })}>
+        <Facts
+          items={[
+            ["University", ai.education.university],
+            ["Faculty", ai.education.faculty],
+            ["Major", ai.education.major],
+            ["Year / term", ai.education.term],
+            ["Graduation", ai.education.graduation],
           ]}
         />
       </Section>
 
       <Section
-        title="Education"
-        emoji="🎓"
-        action={
-          <AddButton label="Add course" onClick={() => setEditing({ kind: "project", project: null, defaultKind: "course" })} />
-        }
+        title="Courses & exams"
+        emoji="📚"
+        action={<AddButton label="Add course" onClick={() => openProject(null, "course")} />}
       >
         {courses.length ? (
           <ItemList
@@ -247,7 +341,7 @@ export default function ProfilePage() {
                 !c.ai_help && "No AI suggestions",
               ],
               progress: c.progress,
-              onEdit: () => setEditing({ kind: "project", project: c, defaultKind: "course" }),
+              onEdit: () => openProject(c, "course"),
             }))}
           />
         ) : (
@@ -255,12 +349,21 @@ export default function ProfilePage() {
         )}
       </Section>
 
+      <Section title="Work" emoji="💼" onEdit={() => setEditing({ kind: "work" })}>
+        <Facts
+          items={[
+            ["Job", ai.work.job],
+            ["Company", ai.work.company],
+            ["Hours", ai.work.hours],
+            ["Responsibilities", ai.work.responsibilities],
+          ]}
+        />
+      </Section>
+
       <Section
-        title="Work & projects"
-        emoji="💼"
-        action={
-          <AddButton label="Add" onClick={() => setEditing({ kind: "project", project: null, defaultKind: "project" })} />
-        }
+        title="Projects"
+        emoji="🛠️"
+        action={<AddButton label="Add" onClick={() => openProject(null, "project")} />}
       >
         {work.length ? (
           <ItemList
@@ -274,11 +377,35 @@ export default function ProfilePage() {
                 p.weekly_hours && `${p.weekly_hours}h/week`,
               ],
               progress: p.progress,
-              onEdit: () => setEditing({ kind: "project", project: p, defaultKind: "project" }),
+              onEdit: () => openProject(p, p.kind),
             }))}
           />
         ) : (
-          <Empty text="No projects yet." />
+          <Empty text="Graduation project, work projects, freelance clients, your business…" />
+        )}
+      </Section>
+
+      <Section title="Business" emoji="🚀" onEdit={() => setEditing({ kind: "business" })}>
+        {ai.business.ideas.length || ai.business.interests.length ? (
+          <div className="space-y-3">
+            {ai.business.ideas.length > 0 && <Chips label="Ideas" values={ai.business.ideas} />}
+            {ai.business.interests.length > 0 && <Chips label="Interested in" values={ai.business.interests} />}
+          </div>
+        ) : (
+          <Empty text="Business ideas and what kind of business interests you." />
+        )}
+      </Section>
+
+      <Section title="Skills & learning" emoji="🧩" onEdit={() => setEditing({ kind: "skills" })}>
+        {ai.skills.length || ai.tools.length || ai.tech_stack.length || ai.learning.length ? (
+          <div className="space-y-3">
+            {ai.skills.length > 0 && <Chips label="Developing" values={ai.skills} />}
+            {ai.tools.length > 0 && <Chips label="Tools to learn" values={ai.tools} />}
+            {ai.tech_stack.length > 0 && <Chips label="Uses" values={ai.tech_stack} />}
+            {ai.learning.length > 0 && <Chips label="Wants to take" values={ai.learning} />}
+          </div>
+        ) : (
+          <Empty text="Skills, AI tools and courses you want to learn." />
         )}
       </Section>
 
@@ -307,15 +434,8 @@ export default function ProfilePage() {
         )}
       </Section>
 
-      <Section title="Interests & skills" emoji="💡" onEdit={() => setEditing({ kind: "interests" })}>
-        {ai.interests.length || ai.skills.length ? (
-          <div className="space-y-3">
-            {ai.interests.length > 0 && <Chips label="Interested in" values={ai.interests} />}
-            {ai.skills.length > 0 && <Chips label="Developing" values={ai.skills} />}
-          </div>
-        ) : (
-          <Empty text="Add what you want to learn or improve." />
-        )}
+      <Section title="Interests" emoji="💡" onEdit={() => setEditing({ kind: "interests" })}>
+        {ai.interests.length ? <Chips label="Interested in" values={ai.interests} /> : <Empty text="Add what interests you." />}
       </Section>
 
       <Section title="Schedule" emoji="🕒" onEdit={() => setEditing({ kind: "schedule" })}>
@@ -335,6 +455,39 @@ export default function ProfilePage() {
             ["Free time to keep", ai.preferences.free_time],
           ]}
         />
+      </Section>
+
+      <Section
+        title="Busy hours"
+        emoji="⛔"
+        action={<AddButton label="Add" onClick={() => setEditing({ kind: "block", block: null })} />}
+      >
+        {ai.blocks.length ? (
+          <ul className="divide-y divide-line">
+            {ai.blocks.map((b) => (
+              <li key={b.id} className="flex items-center gap-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-ink">{b.label}</p>
+                  <p className="text-sm text-muted">
+                    {describeDays(b.days)} · {b.start}–{b.end}
+                  </p>
+                </div>
+                <IconButton label={`Edit ${b.label}`} onClick={() => setEditing({ kind: "block", block: b })}>
+                  <PencilIcon className="h-4 w-4" />
+                </IconButton>
+                <IconButton
+                  label={`Delete ${b.label}`}
+                  danger
+                  onClick={() => updateAI({ blocks: ai.blocks.filter((x) => x.id !== b.id) }, "Busy hours removed")}
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </IconButton>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty text="University classes, work shifts… your AI never plans anything during these." />
+        )}
       </Section>
 
       <Section
@@ -422,7 +575,7 @@ export default function ProfilePage() {
 
       <Section title="AI memory" emoji="💾">
         <p className="mb-3 text-sm text-muted">
-          Facts your AI uses when planning. It adds new ones when you tell it something lasting in the chat.
+          Facts your AI uses when planning. The Persona chat adds new ones when you tell it something lasting.
         </p>
         {ai.memory.length > 0 && (
           <ul className="mb-3 space-y-1.5">
@@ -507,28 +660,71 @@ export default function ProfilePage() {
       >
         {editing?.kind === "about" && (
           <AboutForm
-            initial={{ name: profile.display_name ?? "", ...ai.about }}
+            initial={{
+              name: profile.display_name ?? "",
+              roles: ai.about.roles,
+              headline: ai.about.headline ?? "",
+              age_range: ai.about.age_range ?? "",
+            }}
             saving={saving}
             onCancel={() => setEditing(null)}
-            onSave={({ name, ...about }: AboutValues) =>
+            onSave={({ name, roles, headline, age_range }: AboutValues) =>
               save({
                 display_name: name.trim() || null,
                 ai_profile: {
                   ...ai,
-                  about: Object.fromEntries(
-                    Object.entries(about).map(([k, v]) => [k, v?.trim() || undefined])
-                  ) as AIProfile["about"],
+                  about: {
+                    roles,
+                    headline: headline.trim() || undefined,
+                    age_range: age_range || undefined,
+                  },
                 },
               })
             }
           />
         )}
-        {editing?.kind === "interests" && (
-          <InterestsForm
-            initial={{ interests: ai.interests, skills: ai.skills }}
+        {editing?.kind === "education" && (
+          <FieldsForm
+            fields={[...EDUCATION_FIELDS]}
+            initial={ai.education}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={(education) => updateAI({ education })}
+          />
+        )}
+        {editing?.kind === "work" && (
+          <FieldsForm
+            fields={[...WORK_FIELDS]}
+            initial={ai.work}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={(values) => updateAI({ work: values })}
+          />
+        )}
+        {editing?.kind === "business" && (
+          <ListsForm
+            lists={[...BUSINESS_LISTS]}
+            initial={ai.business}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={(business) => updateAI({ business })}
+          />
+        )}
+        {editing?.kind === "skills" && (
+          <ListsForm
+            lists={[...SKILL_LISTS]}
+            initial={{ skills: ai.skills, tools: ai.tools, tech_stack: ai.tech_stack, learning: ai.learning }}
             saving={saving}
             onCancel={() => setEditing(null)}
             onSave={(values) => updateAI(values)}
+          />
+        )}
+        {editing?.kind === "interests" && (
+          <InterestsForm
+            initial={ai.interests}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={(interests) => updateAI({ interests })}
           />
         )}
         {editing?.kind === "schedule" && (
@@ -557,6 +753,20 @@ export default function ProfilePage() {
                 habits: editing.habit
                   ? ai.habits.map((h) => (h.id === habit.id ? habit : h))
                   : [...ai.habits, habit],
+              })
+            }
+          />
+        )}
+        {editing?.kind === "block" && (
+          <BlockForm
+            initial={editing.block}
+            saving={saving}
+            onCancel={() => setEditing(null)}
+            onSave={(block) =>
+              updateAI({
+                blocks: editing.block
+                  ? ai.blocks.map((b) => (b.id === block.id ? block : b))
+                  : [...ai.blocks, block],
               })
             }
           />
