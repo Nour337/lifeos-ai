@@ -24,6 +24,12 @@ const MAX_TASKS = 40;
 // A Supabase client that acts as the signed-in user (their access token), so
 // RLS still applies and the AI only ever sees that user's own data.
 export async function getUserClient(accessToken: string): Promise<SupabaseClient> {
+  return (await getUserSession(accessToken)).supabase;
+}
+
+export async function getUserSession(
+  accessToken: string
+): Promise<{ supabase: SupabaseClient; userId: string }> {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -37,7 +43,7 @@ export async function getUserClient(accessToken: string): Promise<SupabaseClient
   if (error || !data.user) {
     throw new AIError("Your session has expired. Please log in again.", 401);
   }
-  return supabase;
+  return { supabase, userId: data.user.id };
 }
 
 export async function getOpenTasks(supabase: SupabaseClient): Promise<Task[]> {
@@ -121,7 +127,8 @@ export function buildPrompt(
   tasks: Task[],
   today: string,
   localTime: string,
-  availableMinutes: number | null
+  availableMinutes: number | null,
+  persona = ""
 ): Prompt {
   const list = tasks
     .map((task, i) => `${i + 1}. ${describeTask(task, today)}`)
@@ -129,7 +136,10 @@ export function buildPrompt(
   const time = availableMinutes
     ? `I have about ${availableMinutes} minutes for tasks today.`
     : "I didn't say how much time I have.";
-  const context = `Today is ${today}, local time ${localTime}. ${time}\n\nMy open tasks:\n${list}`;
+  const about = persona
+    ? `\n\nAbout me (respect my schedule, preferences and learned habits):\n${persona}`
+    : "";
+  const context = `Today is ${today}, local time ${localTime}. ${time}${about}\n\nMy open tasks:\n${list}`;
 
   if (mode === "next") {
     return {

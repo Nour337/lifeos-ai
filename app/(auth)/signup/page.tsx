@@ -26,7 +26,7 @@ export default function SignupPage() {
       setSubmitting(false);
     } else if (data.session) {
       // Email confirmation is off: the user is already signed in
-      router.push("/dashboard");
+      router.push("/onboarding");
     } else {
       setCheckEmail(true);
       setSubmitting(false);

@@ -4,7 +4,7 @@ import Link from "next/link";
 import ProgressBar from "@/components/ProgressBar";
 import { CalendarIcon, PencilIcon, TargetIcon, TrashIcon } from "@/components/icons";
 import { formatDate } from "@/utils/date";
-import type { Project } from "@/types/project";
+import { kindOf, type Project } from "@/types/project";
 import type { Progress } from "@/lib/progress";
 
 const emptyProgress: Progress = { done: 0, total: 0, percent: 0 };
@@ -36,7 +36,12 @@ export default function ProjectList({
                 href={`/projects/${project.id}`}
                 className="min-w-0 flex-1 after:absolute after:inset-0 after:rounded-2xl"
               >
-                <p className="truncate font-semibold text-ink">{project.name}</p>
+                <p className="truncate font-semibold text-ink">
+                  <span className="mr-1.5" title={kindOf(project.kind).label} aria-hidden="true">
+                    {kindOf(project.kind).emoji}
+                  </span>
+                  {project.name}
+                </p>
               </Link>
               {/* z-10 keeps the buttons clickable above the card-wide link */}
               <div className="relative z-10 -mr-1 -mt-1 flex opacity-70 transition group-hover:opacity-100">
@@ -71,6 +76,7 @@ export default function ProjectList({
               {project.deadline && (
                 <span className="flex items-center gap-1">
                   <CalendarIcon className="h-3.5 w-3.5" />
+                  {project.kind === "course" ? "Exam " : ""}
                   {formatDate(project.deadline)}
                 </span>
               )}

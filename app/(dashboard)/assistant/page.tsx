@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { takeAssistantPrompt } from "@/lib/persona/client";
 import { useAuth } from "@/lib/AuthContext";
 import { getTasks } from "@/lib/queries/tasks";
 import { getAICreditsLeft, getDisplayName } from "@/lib/queries/profiles";
@@ -24,6 +26,7 @@ type Message = {
   content: string;
   proposal?: Proposal;
   proposalState?: ProposalState;
+  remembered?: string[];
 };
 
 const SUGGESTIONS = [
@@ -70,10 +73,14 @@ export default function AssistantPage() {
   const [creditsLeft, setCreditsLeft] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // A message handed over by another screen ("Plan my week"), sent once
+  // the conversation has loaded
+  const pendingPrompt = useRef<string | null>(null);
 
   // Restore today's conversation, or start a new one with the daily summary
   useEffect(() => {
     if (!user) return;
+    pendingPrompt.current = takeAssistantPrompt();
     const today = toLocalDateString();
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey(user.id)) ?? "null");
@@ -158,6 +165,7 @@ export default function AssistantPage() {
           content: data.reply ?? "",
           proposal: data.proposal ?? undefined,
           proposalState: data.proposal ? "pending" : undefined,
+          remembered: data.remembered?.length ? data.remembered : undefined,
         },
       ]);
     } catch (e) {
@@ -177,6 +185,13 @@ export default function AssistantPage() {
       inputRef.current?.focus();
     }
   };
+
+  useEffect(() => {
+    if (!pendingPrompt.current || messages.length === 0 || sending) return;
+    const prompt = pendingPrompt.current;
+    pendingPrompt.current = null;
+    send(prompt);
+  });
 
   const apply = async (message: Message, choices: Record<string, ConflictChoice>) => {
     if (!user || !message.proposal) return;
@@ -266,6 +281,14 @@ export default function AssistantPage() {
               >
                 {m.content}
               </div>
+              {m.remembered && (
+                <Link
+                  href="/profile"
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-3 py-1 text-xs font-medium text-accent hover:underline"
+                >
+                  🧠 Remembered: {m.remembered.join(" · ")}
+                </Link>
+              )}
               {m.proposal && (
                 <ProposalCard
                   proposal={m.proposal}

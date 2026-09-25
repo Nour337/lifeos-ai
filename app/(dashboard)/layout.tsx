@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { QuickAddProvider, useQuickAdd } from "@/lib/QuickAdd";
+import { getProfile } from "@/lib/queries/persona";
 import { Button, Spinner } from "@/components/ui";
 import {
   CalendarIcon,
@@ -14,6 +15,7 @@ import {
   SparklesIcon,
   SunIcon,
   TargetIcon,
+  UserIcon,
 } from "@/components/icons";
 
 // Phone tab bar: two tabs, the AI button, two tabs
@@ -39,6 +41,8 @@ export default function DashboardLayout({
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  // First-time users meet their AI before the dashboard
+  const [checkedUser, setCheckedUser] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -46,7 +50,23 @@ export default function DashboardLayout({
     }
   }, [loading, user, router]);
 
-  if (loading || !user) {
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getProfile(user.id)
+      .then((profile) => {
+        if (cancelled) return;
+        if (profile.onboarding_status === "pending") router.replace("/onboarding");
+        else setCheckedUser(user.id);
+      })
+      // If the profile can't load, don't lock the user out of their tasks
+      .catch(() => !cancelled && setCheckedUser(user.id));
+    return () => {
+      cancelled = true;
+    };
+  }, [user, router]);
+
+  if (loading || !user || checkedUser !== user.id) {
     return (
       <div className="flex min-h-screen items-center justify-center text-muted">
         <Spinner className="h-6 w-6" />
@@ -118,6 +138,15 @@ function AppShell({ children }: { children: React.ReactNode }) {
               <PlusIcon className="h-4 w-4" />
               New task
             </Button>
+            <Link
+              href="/profile"
+              className={`flex h-10 w-10 items-center justify-center rounded-full bg-surface shadow-card transition hover:text-ink ${
+                isActive("/profile") ? "text-accent" : "text-muted"
+              }`}
+              aria-label="My AI profile"
+            >
+              <UserIcon className="h-5 w-5" />
+            </Link>
             <Link
               href="/settings"
               className={`flex h-10 w-10 items-center justify-center rounded-full bg-surface shadow-card transition hover:text-ink ${

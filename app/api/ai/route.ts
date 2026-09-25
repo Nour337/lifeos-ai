@@ -6,11 +6,13 @@ import {
   consumeCredit,
   getOpenTasks,
   getTask,
-  getUserClient,
+  getUserSession,
   parseNext,
   parsePlan,
   parseSteps,
 } from "@/lib/ai/planDay";
+import { describePersona } from "@/lib/persona/describe";
+import { toProfile } from "@/lib/persona/server";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_PATTERN = /^[0-9a-f-]{36}$/i;
@@ -42,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const supabase = await getUserClient(accessToken);
+    const { supabase, userId } = await getUserSession(accessToken);
 
     if (body.mode === "steps") {
       if (!body.taskId || !UUID_PATTERN.test(body.taskId)) {
@@ -77,8 +79,14 @@ export async function POST(request: Request) {
     }
 
     const remaining = await consumeCredit(supabase);
+    const { data: profileRow } = await supabase
+      .from("profiles")
+      .select("display_name, ai_personality, ai_profile, onboarding_status")
+      .eq("id", userId)
+      .maybeSingle();
+    const persona = profileRow ? describePersona(toProfile(userId, profileRow)) : "";
     const raw = await askAI(
-      buildPrompt(mode, tasks, today, localTime, availableMinutes)
+      buildPrompt(mode, tasks, today, localTime, availableMinutes, persona)
     );
     const result = mode === "next" ? parseNext(raw, tasks) : parsePlan(raw, tasks);
     return Response.json({ result, remaining });

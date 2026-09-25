@@ -58,5 +58,6 @@ export type Proposal = {
 export type AssistantResponse = {
   reply: string;
   proposal: Proposal | null;
+  remembered?: string[]; // facts saved to the user's AI memory
   remaining?: number;
 };

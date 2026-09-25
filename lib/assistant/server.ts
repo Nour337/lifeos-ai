@@ -13,6 +13,11 @@ import type {
   Proposal,
   TaskChange,
 } from "@/lib/assistant/types";
+import { describePersona, styleInstruction } from "@/lib/persona/describe";
+import { computeInsights } from "@/lib/persona/insights";
+import { toProfile } from "@/lib/persona/server";
+import { cleanText, newId, type Profile } from "@/types/persona";
+import { kindOf } from "@/types/project";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
 import type { Task, TaskPriority, TaskStatus } from "@/types/task";
@@ -30,6 +35,8 @@ export type Context = {
   today: string;
   localTime: string;
   name: string | null;
+  profile: Profile;
+  persona: string; // the user's AI profile as prompt text
   tasks: Task[];
   goals: Goal[];
   projects: Project[];
@@ -41,6 +48,7 @@ export type Context = {
 
 export async function loadContext(
   supabase: SupabaseClient,
+  userId: string,
   today: string,
   localTime: string
 ): Promise<Context> {
@@ -66,7 +74,11 @@ export async function loadContext(
       .limit(50),
     supabase.from("goals").select("*").limit(50),
     supabase.from("projects").select("*").limit(80),
-    supabase.from("profiles").select("display_name").maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("display_name, ai_personality, ai_profile, onboarding_status")
+      .eq("id", userId)
+      .maybeSingle(),
   ]);
 
   if (dated.error || undated.error || goals.error || projects.error) {
@@ -74,10 +86,13 @@ export async function loadContext(
   }
 
   const tasks = [...(dated.data as Task[]), ...(undated.data as Task[])];
+  const userProfile = toProfile(userId, profile.data);
   const ctx: Context = {
     today,
     localTime,
-    name: profile.data?.display_name ?? null,
+    name: userProfile.display_name,
+    profile: userProfile,
+    persona: describePersona(userProfile, computeInsights(tasks, today)),
     tasks,
     goals: goals.data as Goal[],
     projects: projects.data as Project[],
@@ -116,7 +131,8 @@ function describeContext(ctx: Context): string {
   const projectLines = [...ctx.projectRef]
     .map(([ref, p]) => {
       const goal = refOf(ctx.goalRef, ctx.goals.find((g) => g.id === p.goal_id));
-      return `[${ref}] ${p.name}${p.deadline ? ` (deadline ${p.deadline})` : ""}${goal ? ` goal=[${goal}]` : ""}`;
+      const deadline = p.deadline ? ` (${p.kind === "course" ? "exam" : "deadline"} ${p.deadline})` : "";
+      return `[${ref}] ${kindOf(p.kind).label}: ${p.name}${deadline}${goal ? ` goal=[${goal}]` : ""}`;
     })
     .join("\n");
 
@@ -141,9 +157,10 @@ function describeContext(ctx: Context): string {
   return [
     `Today is ${ctx.today} (${weekdayName(ctx.today)}), local time ${ctx.localTime}.`,
     ctx.name ? `The user's name is ${ctx.name}.` : "",
-    `Calendar for the next 60 days: ${calendar}`,
+    `\nWhat you know about the user (use it to personalise plans and suggestions):\n${ctx.persona}`,
+    `\nCalendar for the next 60 days: ${calendar}`,
     `\nGoals:\n${goalLines || "(none)"}`,
-    `\nProjects:\n${projectLines || "(none)"}`,
+    `\nCourses and projects:\n${projectLines || "(none)"}`,
     `\nTasks (past 7 days, next 60 days, and undated open tasks):\n${taskLines || "(none)"}`,
   ].join("\n");
 }
@@ -170,7 +187,14 @@ Scheduling rules:
 - For big goals ("finish my project in 30 days", "learn Python", "exam in 10 days"): create new_goal, 3-5 milestones with deadlines, and concrete tasks (30-180 min each, with times) spread over the available days, linked to milestones.
 - Missed tasks ("I didn't go to the gym today"): propose marking it skipped (or moving it) and shifting the following sessions in that routine by the same amount, keeping the pattern. Moved tasks get status "rescheduled".
 - "Move all unfinished tasks to tomorrow": update every open task dated today or earlier.
-- Refer to existing items only by their reference, like t3, g1, p2.`;
+- Refer to existing items only by their reference, like t3, g1, p2.
+- Link study tasks to their course (project ref) and work to its project, so progress is tracked.
+
+Personal coaching:
+- Use what you know about the user: their courses, exams, projects, goals, schedule, routines, preferences and learned behaviour. Respect their sleep time, busy hours and routines, and follow learned behaviour (e.g. no early-morning tasks if they rarely do them; shorter sessions if long ones fail).
+- "I have 2 hours free": suggest 2-3 concrete options from their goals and deadlines and ask which one. If they say "you decide", propose a balanced plan for that time with propose_changes.
+- "Plan my week" / "create a balanced plan": spread sessions over the week across their important areas (deadlines first), keeping free time and routines.
+- When the user tells you a lasting fact useful for planning ("I work night shifts", "I have gym Mon/Wed/Fri", "my exam moved to Dec 20"), call remember with a short sentence. Don't remember one-off requests.`;
 
 // Fields shared by one-off tasks and repeating series
 const taskFields = {
@@ -291,12 +315,27 @@ const TOOL = {
   },
 };
 
+const REMEMBER_TOOL = {
+  type: "function",
+  function: {
+    name: "remember",
+    description: "Save lasting facts about the user to their AI profile (visible and editable in My AI Profile).",
+    parameters: {
+      type: "object",
+      properties: {
+        facts: { type: "array", items: { type: "string" }, description: "Short sentences." },
+      },
+      required: ["facts"],
+    },
+  },
+};
+
 type ToolArgs = Record<string, unknown>;
 
 export async function askAssistant(
   ctx: Context,
   history: ChatMessage[]
-): Promise<{ text: string; args: ToolArgs | null }> {
+): Promise<{ text: string; args: ToolArgs | null; remember: string[] }> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new AIError("The AI assistant isn't set up yet (OPENAI_API_KEY is missing).", 503);
@@ -310,10 +349,13 @@ export async function askAssistant(
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || DEFAULT_MODEL,
         messages: [
-          { role: "system", content: `${SYSTEM_PROMPT}\n\n${describeContext(ctx)}` },
+          {
+            role: "system",
+            content: `${SYSTEM_PROMPT}\n- ${styleInstruction(ctx.profile)}\n\n${describeContext(ctx)}`,
+          },
           ...history.slice(-HISTORY_LIMIT),
         ],
-        tools: [TOOL],
+        tools: [TOOL, REMEMBER_TOOL],
         tool_choice: "auto",
         temperature: 0.3,
         max_tokens: 3000,
@@ -347,7 +389,47 @@ export async function askAssistant(
       throw new AIError("The AI's plan was incomplete. Try asking again.", 502);
     }
   }
-  return { text: (message.content ?? "").trim(), args };
+
+  const remember: string[] = [];
+  for (const c of message.tool_calls ?? []) {
+    if (c.function?.name !== "remember") continue;
+    try {
+      const facts = JSON.parse(c.function.arguments)?.facts;
+      for (const f of Array.isArray(facts) ? facts : []) {
+        const text = cleanText(f, 200);
+        if (text) remember.push(text);
+      }
+    } catch {
+      // a broken memory note isn't worth failing the reply for
+    }
+  }
+  return { text: (message.content ?? "").trim(), args, remember: remember.slice(0, 5) };
+}
+
+// Adds new facts to the user's AI memory. Returns the facts actually added.
+export async function saveMemory(
+  supabase: SupabaseClient,
+  ctx: Context,
+  facts: string[]
+): Promise<string[]> {
+  const profile = ctx.profile.ai_profile;
+  const known = new Set(profile.memory.map((m) => m.text.toLowerCase()));
+  const added = facts.filter((f) => !known.has(f.toLowerCase()));
+  if (!added.length) return [];
+  const now = new Date().toISOString();
+  const memory = [
+    ...profile.memory,
+    ...added.map((text) => ({ id: newId(), text, source: "ai" as const, created_at: now })),
+  ].slice(-50);
+  const { error } = await supabase
+    .from("profiles")
+    .update({ ai_profile: { ...profile, memory }, updated_at: now })
+    .eq("id", ctx.profile.id);
+  if (error) {
+    console.error("Saving memory failed:", error.message);
+    return [];
+  }
+  return added;
 }
 
 // ---------------------------------------------------------------- proposal

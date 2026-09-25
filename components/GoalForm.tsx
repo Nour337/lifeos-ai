@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
-import { Button, Field, Input, Textarea } from "@/components/ui";
+import { Button, Field, Input, Select, Textarea } from "@/components/ui";
+import { IMPORTANCE_LABELS, type Importance } from "@/types/persona";
 import type { Goal } from "@/types/goal";
 
 type GoalFormProps = {
@@ -20,10 +21,16 @@ export default function GoalForm({
   const { user } = useAuth();
   // Initial values come from editingGoal; the form remounts per goal
   const [name, setName] = useState(editingGoal?.name ?? "");
+  const [why, setWhy] = useState(editingGoal?.why ?? "");
   const [description, setDescription] = useState(
     editingGoal?.description ?? ""
   );
   const [targetDate, setTargetDate] = useState(editingGoal?.target_date ?? "");
+  const [priority, setPriority] = useState<Importance | "">(editingGoal?.priority ?? "");
+  const [weeklyHours, setWeeklyHours] = useState(
+    editingGoal?.weekly_hours != null ? String(editingGoal.weekly_hours) : ""
+  );
+  const [progress, setProgress] = useState(editingGoal?.progress ?? 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,17 +41,20 @@ export default function GoalForm({
     setSaving(true);
     setError("");
 
+    const hours = Number(weeklyHours);
     const goalData = {
       name: name.trim(),
+      why: why.trim() || null,
       description: description.trim() || null,
       target_date: targetDate || null,
+      priority: priority || null,
+      weekly_hours: weeklyHours && Number.isFinite(hours) ? Math.min(Math.max(hours, 0), 100) : null,
+      progress,
     };
 
     const result = editingGoal
       ? await supabase.from("goals").update(goalData).eq("id", editingGoal.id)
-      : await supabase
-          .from("goals")
-          .insert({ user_id: user.id, progress: 0, ...goalData });
+      : await supabase.from("goals").insert({ user_id: user.id, ...goalData });
 
     setSaving(false);
 
@@ -62,7 +72,7 @@ export default function GoalForm({
         {(id) => (
           <Input
             id={id}
-            placeholder="e.g. Run a 10K"
+            placeholder="e.g. Learn AI automation"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
@@ -70,23 +80,82 @@ export default function GoalForm({
           />
         )}
       </Field>
-      <Field label="Why it matters">
+      <Field label="Why is this important to you?">
         {(id) => (
           <Textarea
             id={id}
-            placeholder="Optional"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            placeholder="Optional. The AI uses this to motivate you"
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
           />
         )}
       </Field>
-      <Field label="Target date">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Target date">
+          {(id) => (
+            <Input
+              id={id}
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Priority">
+          {(id) => (
+            <Select
+              id={id}
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Importance | "")}
+            >
+              <option value="">Not set</option>
+              {Object.entries(IMPORTANCE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+      <Field label="Hours per week you can give it">
         {(id) => (
           <Input
             id={id}
-            type="date"
-            value={targetDate}
-            onChange={(e) => setTargetDate(e.target.value)}
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={100}
+            step={0.5}
+            placeholder="e.g. 5"
+            value={weeklyHours}
+            onChange={(e) => setWeeklyHours(e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label={`Current progress: ${progress}%`}>
+        {(id) => (
+          <input
+            id={id}
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={progress}
+            onChange={(e) => setProgress(Number(e.target.value))}
+            className="w-full accent-[var(--accent)]"
+          />
+        )}
+      </Field>
+      <Field label="Notes">
+        {(id) => (
+          <Textarea
+            id={id}
+            rows={2}
+            placeholder="Optional"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
         )}
       </Field>

@@ -6,10 +6,13 @@ import { useAuth } from "@/lib/AuthContext";
 import { getTasks } from "@/lib/queries/tasks";
 import { getGoals } from "@/lib/queries/goals";
 import { getProjects } from "@/lib/queries/projects";
-import { getDisplayName } from "@/lib/queries/profiles";
+import { getProfile } from "@/lib/queries/persona";
+import { sectionStatus } from "@/lib/persona/sections";
 import { useTaskActions } from "@/lib/useTaskActions";
 import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import AIPanel from "@/components/AIPanel";
+import CoachPanel from "@/components/CoachPanel";
+import SuggestionsCard from "@/components/SuggestionsCard";
 import TaskForm from "@/components/TaskForm";
 import WeekStrip from "@/components/WeekStrip";
 import WeeklyProgress from "@/components/WeeklyProgress";
@@ -17,7 +20,7 @@ import ProgressBar from "@/components/ProgressBar";
 import { getGoalProgress } from "@/lib/progress";
 import { TaskCard } from "@/components/TaskList";
 import { ErrorState, Modal, Skeleton } from "@/components/ui";
-import { FolderIcon, PlusIcon, SparklesIcon, TargetIcon } from "@/components/icons";
+import { BrainIcon, FolderIcon, PlusIcon, SparklesIcon, TargetIcon } from "@/components/icons";
 import {
   addDays,
   describeDue,
@@ -29,6 +32,7 @@ import {
 import { isDone, isOpen, type Task } from "@/types/task";
 import type { Goal } from "@/types/goal";
 import type { Project } from "@/types/project";
+import { SECTIONS, type Profile } from "@/types/persona";
 
 const dayParts: { key: DayPart; label: string; icon: string; tint: string }[] = [
   { key: "morning", label: "Morning", icon: "☀️", tint: "bg-warn-soft" },
@@ -48,7 +52,7 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [now, setNow] = useState(() => new Date());
@@ -71,7 +75,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     refresh();
-    getDisplayName(user.id).then(setDisplayName);
+    getProfile(user.id).then(setProfile).catch(() => setProfile(null));
   }, [user, refresh]);
 
   useTasksChanged(refresh);
@@ -155,7 +159,10 @@ export default function DashboardPage() {
 
   const completed = dayTasks.filter(isDone).length;
   const pending = dayTasks.filter(isOpen).length + overdue.length;
-  const name = displayName ?? user?.email?.split("@")[0] ?? "there";
+  const name = profile?.display_name ?? user?.email?.split("@")[0] ?? "there";
+  const sectionsDone = profile
+    ? Object.values(sectionStatus(profile.ai_profile, projects, goals)).filter(Boolean).length
+    : SECTIONS.length;
   const [y, m, d] = selectedDay.split("-").map(Number);
   const selectedLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, {
     weekday: "long",
@@ -227,6 +234,30 @@ export default function DashboardPage() {
 
           {isToday && (
             <>
+              {sectionsDone < SECTIONS.length - 2 && (
+                <Link
+                  href="/onboarding"
+                  className="flex items-center gap-3 rounded-2xl bg-hero p-4 text-hero-ink shadow-card transition hover:brightness-110"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-grad-from to-grad-to text-white">
+                    <BrainIcon className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold">Help your AI get to know you</span>
+                    <span className="block text-sm opacity-75">
+                      {sectionsDone} of {SECTIONS.length} done · better suggestions in 3 minutes
+                    </span>
+                  </span>
+                  <span className="opacity-60">›</span>
+                </Link>
+              )}
+              <CoachPanel tasks={tasks} />
+              <SuggestionsCard
+                key={today}
+                tasks={tasks}
+                profile={profile?.ai_profile ?? null}
+                today={today}
+              />
               <AIPanel tasks={tasks} onToggle={toggle} />
               <Link
                 href="/assistant"
@@ -300,6 +331,20 @@ export default function DashboardPage() {
           )}
 
           <WeeklyProgress tasks={tasks} weekOf={selectedDay} today={today} />
+
+          <Link
+            href="/review"
+            className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ok-soft text-lg">📊</span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold text-ink">AI weekly review</span>
+              <span className="block truncate text-sm text-muted">
+                What you completed, what you missed, and what to focus on next
+              </span>
+            </span>
+            <span className="text-muted">›</span>
+          </Link>
 
           {goalProgress.length > 0 && (
             <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">

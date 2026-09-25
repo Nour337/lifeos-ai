@@ -22,19 +22,31 @@ Project   Task (optional direct link)
 | name         | text      |                                 |
 | description  | text      |                                 |
 | target_date  | date      |                                 |
-| progress     | int       | 0-100                          |
+| progress     | int       | 0-100, the user's own estimate |
+| why          | text      | why the goal matters            |
+| priority     | text      | low / medium / high / very_high |
+| weekly_hours | numeric   | hours per week the user can give |
 | created_at   | timestamp |                                 |
 
 ### projects
+Also holds courses (`kind = 'course'`, `deadline` = exam date) and work
+(graduation project, job, freelance, business idea...), so study and work
+tasks link to them through `tasks.project_id`.
+
 | Column       | Type      | Notes                          |
 |--------------|-----------|---------------------------------|
 | id           | uuid      | primary key                    |
 | user_id      | uuid      | owner                          |
 | name         | text      |                                 |
 | description  | text      |                                 |
-| deadline     | date      |                                 |
-| progress     | int       |                                 |
+| deadline     | date      | exam date for courses           |
+| progress     | int       | 0-100, the user's own estimate  |
 | goal_id      | uuid, nullable | FK -> goals.id            |
+| kind         | text      | course / university / graduation / personal / freelance / business / internship / job / research / project / other |
+| importance   | text      | low / medium / high / very_high |
+| difficulty   | text      | easy / medium / hard (courses)  |
+| weekly_hours | numeric   | hours per week                  |
+| ai_help      | bool      | false = no AI suggestions for it |
 | created_at   | timestamp |                                 |
 
 ### tasks
@@ -68,6 +80,27 @@ Project   Task (optional direct link)
 Users can only read their row. `consume_ai_credit()` (security definer)
 is the only writer and enforces the daily limit of 10.
 See `supabase/migrations/`.
+
+### profiles
+| Column            | Type  | Notes                                         |
+|-------------------|-------|-----------------------------------------------|
+| id                | uuid  | = auth.users.id; created by a trigger on signup |
+| display_name      | text  |                                               |
+| ai_personality    | text  | friendly / direct / coach / professional / teacher / balanced |
+| ai_profile        | jsonb | the AI persona: about, interests, skills, schedule, preferences, habits, instructions, summary, memory, ignored suggestion areas, covered onboarding sections (see `types/persona.ts`) |
+| onboarding_status | text  | pending (show onboarding) / skipped / done    |
+
+### weekly_reviews
+| Column     | Type  | Notes                                    |
+|------------|-------|------------------------------------------|
+| user_id    | uuid  | part of primary key                      |
+| week_start | date  | Monday, part of primary key              |
+| review     | jsonb | stats + AI text (`WeeklyReview` in `lib/persona/types.ts`) |
+
+### ai_usage_extra
+Separate small daily budgets that don't use the 10 questions:
+onboarding 40, suggest 5, review 3. `consume_extra_ai_credit(kind)`
+(security definer) is the only writer.
 
 ## Key Decision Log
 - Deviated from roadmap: used `projects.goal_id` instead of

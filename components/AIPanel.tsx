@@ -14,6 +14,12 @@ import { isOpen, type Task } from "@/types/task";
 
 type Mode = "plan" | "next";
 
+export const CREDITS_EVENT = "lifeos:ai-credits";
+
+export function announceCredits(remaining: number) {
+  window.dispatchEvent(new CustomEvent(CREDITS_EVENT, { detail: remaining }));
+}
+
 const timeOptions = [
   { minutes: null, label: "Any" },
   { minutes: 60, label: "1h" },
@@ -39,6 +45,13 @@ export default function AIPanel({
   useEffect(() => {
     if (user) getAICreditsLeft(user.id).then(setCreditsLeft);
   }, [user]);
+
+  // Other AI buttons on the screen use the same daily questions
+  useEffect(() => {
+    const onUsed = (e: Event) => setCreditsLeft((e as CustomEvent<number>).detail);
+    window.addEventListener(CREDITS_EVENT, onUsed);
+    return () => window.removeEventListener(CREDITS_EVENT, onUsed);
+  }, []);
 
   const hasOpenTasks = tasks.some(isOpen);
   const outOfCredits = creditsLeft === 0;
@@ -97,10 +110,10 @@ export default function AIPanel({
       <button
         onClick={() => ask("plan")}
         disabled={!hasOpenTasks || loadingMode !== null || outOfCredits}
-        className="flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-grad-from to-grad-to text-[17px] font-semibold text-white shadow-lg shadow-accent/30 transition hover:brightness-110 active:scale-[0.99] disabled:opacity-60"
+        className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-surface font-semibold text-accent shadow-card transition hover:bg-accent-soft active:scale-[0.99] disabled:opacity-60"
       >
         {loadingMode === "plan" ? (
-          <Spinner className="h-5 w-5" />
+          <Spinner className="h-4 w-4" />
         ) : (
           <CalendarIcon className="h-5 w-5" />
         )}
@@ -129,18 +142,6 @@ export default function AIPanel({
               </button>
             ))}
           </div>
-          <button
-            onClick={() => ask("next")}
-            disabled={loadingMode !== null || outOfCredits}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-surface px-3 text-xs font-semibold text-accent shadow-card transition hover:bg-accent-soft disabled:opacity-60"
-          >
-            {loadingMode === "next" ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <SparklesIcon className="h-3.5 w-3.5" />
-            )}
-            What now?
-          </button>
         </div>
       ) : (
         <p className="text-center text-sm text-muted">

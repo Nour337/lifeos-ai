@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
@@ -12,7 +13,7 @@ import {
 } from "@/lib/queries/profiles";
 import { useToast } from "@/components/Toast";
 import { Button, Card, Field, Input, PageHeader, SectionTitle, Skeleton } from "@/components/ui";
-import { LogoutIcon, SparklesIcon } from "@/components/icons";
+import { LogoutIcon, SparklesIcon, UserIcon } from "@/components/icons";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -68,6 +69,20 @@ export default function SettingsPage() {
   return (
     <div className="space-y-5">
       <PageHeader title="Settings" subtitle={user?.email} />
+
+      <Link
+        href="/profile"
+        className="flex items-center gap-3 rounded-2xl bg-surface p-4 shadow-card transition hover:ring-2 hover:ring-accent/20"
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-grad-from to-grad-to text-white">
+          <UserIcon className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-ink">My AI profile</span>
+          <span className="block text-sm text-muted">What your AI knows about you, and how it behaves</span>
+        </span>
+        <span className="text-muted">›</span>
+      </Link>
 
       <Card>
         <SectionTitle>Your name</SectionTitle>

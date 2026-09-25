@@ -1,5 +1,5 @@
-import { AIError, consumeCredit, getUserClient } from "@/lib/ai/planDay";
-import { askAssistant, buildProposal, loadContext } from "@/lib/assistant/server";
+import { AIError, consumeCredit, getUserSession } from "@/lib/ai/planDay";
+import { askAssistant, buildProposal, loadContext, saveMemory } from "@/lib/assistant/server";
 import type { AssistantResponse, ChatMessage } from "@/lib/assistant/types";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -45,20 +45,22 @@ export async function POST(request: Request) {
     body.localTime && TIME_PATTERN.test(body.localTime) ? body.localTime : "12:00";
 
   try {
-    const supabase = await getUserClient(accessToken);
+    const { supabase, userId } = await getUserSession(accessToken);
     const remaining = await consumeCredit(supabase);
-    const ctx = await loadContext(supabase, today, localTime);
-    const { text, args } = await askAssistant(ctx, messages);
+    const ctx = await loadContext(supabase, userId, today, localTime);
+    const { text, args, remember } = await askAssistant(ctx, messages);
     const proposal = args ? buildProposal(args, ctx) : null;
+    const remembered = remember.length ? await saveMemory(supabase, ctx, remember) : [];
 
     const reply =
       text ||
       proposal?.summary ||
+      (remembered.length ? "Got it, I'll remember that." : null) ||
       (args
         ? "I couldn't turn that into tasks. Could you say it another way, with dates or days?"
         : "Sorry, I didn't get that. Could you rephrase?");
 
-    return Response.json({ reply, proposal, remaining } satisfies AssistantResponse);
+    return Response.json({ reply, proposal, remembered, remaining } satisfies AssistantResponse);
   } catch (error) {
     if (error instanceof AIError) {
       return Response.json({ error: error.message }, { status: error.status });
