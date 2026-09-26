@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { getGoals, deleteGoal } from "@/lib/queries/goals";
 import { getProjects } from "@/lib/queries/projects";
 import { getTasks } from "@/lib/queries/tasks";
-import { getGoalProgress, type Progress } from "@/lib/progress";
+import { getGoalProgress, getProjectProgress, type Progress } from "@/lib/progress";
 import GoalList from "@/components/GoalList";
 import GoalForm from "@/components/GoalForm";
 import { useToast } from "@/components/Toast";
@@ -46,7 +46,7 @@ export default function GoalsPage() {
   const progressByGoal = useMemo(() => {
     const result: Record<string, Progress> = {};
     for (const goal of goals) {
-      result[goal.id] = getGoalProgress(goal.id, tasks, projects);
+      result[goal.id] = getGoalProgress(goal, tasks, projects);
     }
     return result;
   }, [goals, tasks, projects]);
@@ -54,12 +54,26 @@ export default function GoalsPage() {
   const projectCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const project of projects) {
-      if (project.goal_id) {
+      if (project.goal_id && project.kind !== "milestone") {
         counts[project.goal_id] = (counts[project.goal_id] ?? 0) + 1;
       }
     }
     return counts;
   }, [projects]);
+
+  // A goal's milestones, in order, with whether their tasks are all done
+  const milestonesByGoal = useMemo(() => {
+    const result: Record<string, (Project & { done: boolean })[]> = {};
+    for (const p of projects) {
+      if (p.kind !== "milestone" || !p.goal_id) continue;
+      const progress = getProjectProgress(p, tasks);
+      (result[p.goal_id] ??= []).push({ ...p, done: progress.total > 0 && progress.done === progress.total });
+    }
+    for (const list of Object.values(result)) {
+      list.sort((a, b) => (a.deadline ?? "9999").localeCompare(b.deadline ?? "9999"));
+    }
+    return result;
+  }, [projects, tasks]);
 
   const closeForm = useCallback(() => setForm(null), []);
 
@@ -112,6 +126,7 @@ export default function GoalsPage() {
           goals={goals}
           progressByGoal={progressByGoal}
           projectCounts={projectCounts}
+          milestonesByGoal={milestonesByGoal}
           onEditGoal={(goal) => setForm({ goal })}
           onDeleteGoal={handleDeleteGoal}
         />

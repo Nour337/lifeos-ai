@@ -31,6 +31,8 @@ export default function GoalForm({
     editingGoal?.weekly_hours != null ? String(editingGoal.weekly_hours) : ""
   );
   const [progress, setProgress] = useState(editingGoal?.progress ?? 0);
+  // Off = calculated from the goal's tasks and milestones
+  const [manual, setManual] = useState(editingGoal?.progress_manual ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -49,7 +51,8 @@ export default function GoalForm({
       target_date: targetDate || null,
       priority: priority || null,
       weekly_hours: weeklyHours && Number.isFinite(hours) ? Math.min(Math.max(hours, 0), 100) : null,
-      progress,
+      progress: manual ? progress : 0,
+      progress_manual: manual,
     };
 
     const result = editingGoal
@@ -134,20 +137,31 @@ export default function GoalForm({
           />
         )}
       </Field>
-      <Field label={`Current progress: ${progress}%`}>
-        {(id) => (
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-ink">
           <input
-            id={id}
+            type="checkbox"
+            checked={manual}
+            onChange={(e) => setManual(e.target.checked)}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          Set progress by hand{manual ? `: ${progress}%` : ""}
+        </label>
+        {manual ? (
+          <input
             type="range"
             min={0}
             max={100}
             step={5}
             value={progress}
             onChange={(e) => setProgress(Number(e.target.value))}
-            className="w-full accent-[var(--accent)]"
+            className="mt-2 w-full accent-[var(--accent)]"
+            aria-label="Progress"
           />
+        ) : (
+          <p className="mt-1 text-xs text-muted">Calculated from its tasks and milestones.</p>
         )}
-      </Field>
+      </div>
       <Field label="Notes">
         {(id) => (
           <Textarea

@@ -1,6 +1,9 @@
 import { supabase } from "@/lib/supabaseClient";
-import { minutesToTime, timeToMinutes } from "@/utils/date";
-import type { ConflictChoice, Proposal } from "@/lib/assistant/types";
+import { ensureOccurrences } from "@/lib/series";
+import { updateAIProfile } from "@/lib/queries/persona";
+import { minutesToTime, timeToMinutes, toLocalDateString } from "@/utils/date";
+import type { ConflictChoice, PersonaUndo, Proposal } from "@/lib/assistant/types";
+import type { AIProfile } from "@/types/persona";
 
 export type ApplyResult = {
   created: number;
@@ -9,56 +12,18 @@ export type ApplyResult = {
   skipped: number;
 };
 
-// Saves an approved proposal. Runs in the browser as the signed-in user, so
-// RLS applies exactly as for manual edits.
-export async function applyProposal(
-  proposal: Proposal,
-  userId: string,
-  choices: Record<string, ConflictChoice>
-): Promise<ApplyResult> {
-  const fail = (what: string, message: string): never => {
-    console.error(`Apply failed (${what}):`, message);
-    throw new Error(`Couldn't save the ${what}. Nothing after that step was changed.`);
-  };
+// Without a choice, move the new task if there's a free slot, else keep both
+export function defaultChoice(conflict: { suggestedStart: string | null }): ConflictChoice {
+  return conflict.suggestedStart ? "move_new" : "keep_both";
+}
 
-  // 1. New goal and its milestones (milestones are projects under the goal)
-  let goalId: string | null = null;
-  if (proposal.newGoal) {
-    const { data, error } = await supabase
-      .from("goals")
-      .insert({
-        user_id: userId,
-        name: proposal.newGoal.name,
-        description: proposal.newGoal.description,
-        target_date: proposal.newGoal.targetDate,
-        progress: 0,
-      })
-      .select("id")
-      .single();
-    if (error) fail("goal", error.message);
-    goalId = data!.id;
-  }
-
-  const milestoneIds = new Map<string, string>();
-  for (const milestone of proposal.milestones) {
-    const { data, error } = await supabase
-      .from("projects")
-      .insert({
-        user_id: userId,
-        name: milestone.name,
-        deadline: milestone.deadline,
-        goal_id: goalId,
-      })
-      .select("id")
-      .single();
-    if (error) fail("milestones", error.message);
-    milestoneIds.set(milestone.key, data!.id);
-  }
-
-  // 2. New tasks, applying the user's choice for each time conflict
+// Builds the payload for apply_proposal from the approved proposal and the
+// user's choice for each time conflict.
+function payload(proposal: Proposal, choices: Record<string, ConflictChoice>) {
   let skipped = 0;
-  const moveExisting: { id: string; start: string; end: string }[] = [];
-  const rows = [];
+  const moves: { id: string; due_time: string; end_time: string }[] = [];
+  const creates = [];
+
   for (const draft of proposal.creates) {
     let start = draft.start;
     let end = draft.end;
@@ -73,18 +38,22 @@ export async function applyProposal(
       start = draft.conflict.suggestedStart;
       end = end ? minutesToTime(timeToMinutes(end) + shift) : null;
     }
-    if (choice === "move_existing" && draft.conflict?.suggestedStart && draft.conflict.existingTaskId) {
+    if (
+      choice === "move_existing" &&
+      draft.conflict?.suggestedStart &&
+      draft.conflict.existingTaskId &&
+      !draft.conflict.existingFixed
+    ) {
       const c = draft.conflict;
       const length = timeToMinutes(c.existingEnd) - timeToMinutes(c.existingStart);
-      moveExisting.push({
+      moves.push({
         id: c.existingTaskId!,
-        start: c.suggestedStart!,
-        end: minutesToTime(timeToMinutes(c.suggestedStart!) + length),
+        due_time: c.suggestedStart!,
+        end_time: minutesToTime(timeToMinutes(c.suggestedStart!) + length),
       });
     }
 
-    rows.push({
-      user_id: userId,
+    creates.push({
       title: draft.title,
       description: draft.notes,
       due_date: draft.date,
@@ -93,51 +62,123 @@ export async function applyProposal(
       estimated_duration: draft.duration,
       priority: draft.priority,
       category: draft.category,
-      status: "todo",
-      goal_id: draft.newGoal ? goalId : draft.goalId,
-      project_id: (draft.milestoneKey && milestoneIds.get(draft.milestoneKey)) || draft.projectId,
+      energy: draft.energy,
+      is_fixed: draft.isFixed,
+      project_id: draft.projectId,
+      goal_id: draft.goalId,
+      new_goal: draft.newGoal,
+      milestone_key: draft.milestoneKey,
+      series_key: draft.seriesKey,
+      occurrence_date: draft.seriesKey ? draft.date : null,
     });
   }
 
-  if (rows.length) {
-    const { error } = await supabase.from("tasks").insert(rows);
-    if (error) fail("new tasks", error.message);
-  }
-
-  // 3. Changes to existing tasks
-  for (const move of moveExisting) {
-    const { error } = await supabase
-      .from("tasks")
-      .update({ due_time: move.start, end_time: move.end, status: "rescheduled" })
-      .eq("id", move.id);
-    if (error) fail("moved task", error.message);
-  }
-  for (const update of proposal.updates) {
-    const { error } = await supabase.from("tasks").update(update.after).eq("id", update.taskId);
-    if (error) fail("task changes", error.message);
-  }
-
-  // 4. Deletions
-  if (proposal.deletes.length) {
-    const { error } = await supabase
-      .from("tasks")
-      .delete()
-      .in(
-        "id",
-        proposal.deletes.map((d) => d.taskId)
-      );
-    if (error) fail("deletions", error.message);
-  }
-
   return {
-    created: rows.length,
-    updated: proposal.updates.length + moveExisting.length,
-    deleted: proposal.deletes.length,
+    skipped,
+    body: {
+      new_goal: proposal.newGoal
+        ? {
+            name: proposal.newGoal.name,
+            description: proposal.newGoal.description,
+            target_date: proposal.newGoal.targetDate,
+            why: proposal.newGoal.why,
+            priority: proposal.newGoal.priority,
+            weekly_hours: proposal.newGoal.weeklyHours,
+          }
+        : null,
+      milestones: proposal.milestones,
+      series: proposal.series.map((s) => ({
+        key: s.key,
+        title: s.title,
+        description: s.notes,
+        pattern: s.pattern,
+        start_date: s.startDate,
+        until: s.until,
+        count: s.count,
+        due_time: s.start,
+        end_time: s.start ? s.end : null,
+        estimated_duration: s.duration,
+        priority: s.priority,
+        category: s.category,
+        energy: s.energy,
+        project_id: s.projectId,
+        goal_id: s.goalId,
+        new_goal: s.newGoal,
+        milestone_key: s.milestoneKey,
+        is_routine: s.isRoutine,
+      })),
+      creates,
+      moves,
+      updates: proposal.updates.map((u) => ({ id: u.taskId, changes: u.after })),
+      series_changes: proposal.seriesChanges.map((c) => ({
+        id: c.seriesId,
+        action: c.action,
+        from_date: c.fromDate,
+        changes: c.changes,
+      })),
+      deletes: proposal.deletes.map((d) => d.taskId),
+    },
+  };
+}
+
+// Saves an approved proposal in one transaction (apply_proposal): either
+// everything is saved or nothing is. The proposal id makes it safe to press
+// Apply twice. Runs as the signed-in user, so row level security applies.
+export async function applyProposal(
+  proposal: Proposal,
+  choices: Record<string, ConflictChoice>,
+  messageId?: number
+): Promise<ApplyResult> {
+  const { skipped, body } = payload(proposal, choices);
+  const { data, error } = await supabase.rpc("apply_proposal", { p_key: proposal.id, p_payload: body });
+  if (error) {
+    console.error("Apply failed:", error.message);
+    throw new Error("Couldn't save the plan. Nothing was changed; try again.");
+  }
+
+  // Routines: create their sessions beyond the first weeks / from the new rule
+  if (proposal.series.length || proposal.seriesChanges.length) {
+    await ensureOccurrences(supabase, toLocalDateString()).catch(() => 0);
+  }
+  if (messageId) {
+    await supabase.from("messages").update({ proposal_state: "applied" }).eq("id", messageId);
+  }
+
+  const result = (data ?? {}) as { created?: number; updated?: number; deleted?: number };
+  return {
+    created: result.created ?? 0,
+    updated: result.updated ?? 0,
+    deleted: result.deleted ?? 0,
     skipped,
   };
 }
 
-// Without a choice, move the new task if there's a free slot, else keep both
-export function defaultChoice(conflict: { suggestedStart: string | null }): ConflictChoice {
-  return conflict.suggestedStart ? "move_new" : "keep_both";
+export async function discardProposal(messageId: number): Promise<void> {
+  await supabase.from("messages").update({ proposal_state: "discarded" }).eq("id", messageId);
+}
+
+// Undo what the AI learned in one reply: previous persona values come back,
+// records it changed are restored, records it created are removed.
+export async function undoPersonaChanges(userId: string, undo: PersonaUndo, messageId?: number): Promise<boolean> {
+  let ok = true;
+  if (Object.keys(undo.profile).length) {
+    const saved = await updateAIProfile(userId, (current) => ({ ...current, ...(undo.profile as Partial<AIProfile>) }));
+    ok = !!saved;
+  }
+  for (const row of [...undo.rows].reverse()) {
+    const { error } = row.before
+      ? await supabase.from(row.table).update(row.before).eq("id", row.id)
+      : await supabase.from(row.table).delete().eq("id", row.id);
+    if (error) ok = false;
+  }
+  if (ok && messageId) {
+    const { data } = await supabase.from("messages").select("remembered").eq("id", messageId).maybeSingle();
+    if (data?.remembered) {
+      await supabase
+        .from("messages")
+        .update({ remembered: { ...data.remembered, undone: true } })
+        .eq("id", messageId);
+    }
+  }
+  return ok;
 }

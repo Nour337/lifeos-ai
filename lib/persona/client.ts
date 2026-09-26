@@ -1,13 +1,14 @@
 import type { Session } from "@supabase/supabase-js";
-import type { Usage } from "@/lib/persona/types";
+import type { Budget } from "@/lib/ai/budget";
 
 // Browser-side POST to one of the AI routes. Throws an Error with a friendly
-// message on failure.
+// message on failure. A returned budget is announced so every meter on the
+// screen updates.
 export async function postAI<T>(
   session: Session,
-  path: "/api/coach" | "/api/onboarding",
+  path: "/api/coach" | "/api/onboarding" | "/api/assistant",
   body: Record<string, unknown>
-): Promise<T & { usage?: Usage; remaining?: number }> {
+): Promise<T & { budget?: Budget }> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -16,7 +17,7 @@ export async function postAI<T>(
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...nowFields(), ...body }),
     });
   } catch {
     throw new Error("Couldn't reach the server. Check your connection.");
@@ -24,12 +25,23 @@ export async function postAI<T>(
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    // A limit or failure may have changed the count: let meters reload
+    announceBudget(null);
     throw new Error(data.error ?? "The AI is unavailable right now.");
   }
+  if (data.budget) announceBudget(data.budget);
   return data;
 }
 
-// Date and time in the user's own timezone, for every AI request
+export const BUDGET_EVENT = "lifeos:ai-budget";
+
+// null = "reload it"
+export function announceBudget(budget: Budget | null) {
+  window.dispatchEvent(new CustomEvent(BUDGET_EVENT, { detail: budget }));
+}
+
+// Date and time from the browser: only a fallback for the server, which
+// uses the timezone saved in the profile
 export function nowFields(now = new Date()) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return {
@@ -39,7 +51,7 @@ export function nowFields(now = new Date()) {
 }
 
 // Hand a message to the assistant screen, which sends it on arrival
-// ("Plan my week" after onboarding, "Change" on a plan...).
+// ("Plan my week" after onboarding, "Plan next week" from the review...).
 const PROMPT_KEY = "lifeos-assistant-prompt";
 
 export function queueAssistantPrompt(text: string) {
@@ -57,5 +69,18 @@ export function takeAssistantPrompt(): string | null {
     return text;
   } catch {
     return null;
+  }
+}
+
+// Everything this app keeps in the browser for a user (cleared on logout)
+export function clearLocalData() {
+  try {
+    for (const store of [localStorage, sessionStorage]) {
+      Object.keys(store)
+        .filter((key) => key.startsWith("lifeos-"))
+        .forEach((key) => store.removeItem(key));
+    }
+  } catch {
+    // storage blocked: nothing to clear
   }
 }

@@ -4,6 +4,7 @@ import {
   CalendarIcon,
   CheckIcon,
   FolderIcon,
+  PlayIcon,
   RepeatIcon,
   TrashIcon,
 } from "@/components/icons";
@@ -14,10 +15,11 @@ import {
   toLocalDateString,
   type DueTone,
 } from "@/utils/date";
-import { isOpen, type Task } from "@/types/task";
+import { isOpen, priorityLabels, type Task } from "@/types/task";
 
 // Left edge color: green when done, otherwise by priority
 const edgeColors: Record<string, string> = {
+  very_high: "border-l-danger",
   high: "border-l-danger",
   medium: "border-l-warn",
   low: "border-l-accent",
@@ -34,6 +36,7 @@ type TaskActions = {
   onEditTask: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onToggleStatus: (task: Task) => void;
+  onStartTask?: (task: Task) => void; // focus timer
 };
 
 export default function TaskList({
@@ -65,6 +68,7 @@ export function TaskCard({
   onEditTask,
   onDeleteTask,
   onToggleStatus,
+  onStartTask,
 }: {
   task: Task;
   projectName?: string;
@@ -115,10 +119,8 @@ export function TaskCard({
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[13px] text-muted">
           {timeLine && <span>{timeLine}</span>}
           {skipped && <span className="font-medium">Skipped</span>}
-          {task.status === "rescheduled" && (
-            <span className="rounded-full bg-warn-soft px-2 py-px text-xs font-medium text-warn">
-              Rescheduled
-            </span>
+          {task.is_fixed && (
+            <span className="rounded-full bg-warn-soft px-2 py-px text-xs font-medium text-warn">Fixed</span>
           )}
           {due && open && (
             <span className={`flex items-center gap-1 ${dueStyles[due.tone]}`}>
@@ -129,12 +131,13 @@ export function TaskCard({
           {task.status === "in_progress" && (
             <span className="font-medium text-accent">In progress</span>
           )}
-          {task.repeat && (
-            <span className="flex items-center gap-1 capitalize">
+          {task.series_id && (
+            <span className="flex items-center gap-1">
               <RepeatIcon className="h-3.5 w-3.5" />
-              {task.repeat}
+              Routine
             </span>
           )}
+          {task.energy === "deep" && open && <span>🧠 Deep focus</span>}
           {projectName && (
             <span className="flex items-center gap-1">
               <FolderIcon className="h-3.5 w-3.5" />
@@ -146,8 +149,8 @@ export function TaskCard({
               {task.category}
             </span>
           )}
-          {!timeLine && !due && !task.category && !projectName && !task.repeat && (
-            <span className="capitalize">{task.priority} priority</span>
+          {!timeLine && !due && !task.category && !projectName && !task.series_id && (
+            <span>{priorityLabels[task.priority]} priority</span>
           )}
         </div>
         {showProgress && (
@@ -162,6 +165,16 @@ export function TaskCard({
           </div>
         )}
       </button>
+
+      {onStartTask && open && (
+        <button
+          onClick={() => onStartTask(task)}
+          className="rounded-lg p-2 text-accent/70 transition hover:bg-accent-soft hover:text-accent"
+          aria-label={`Start "${task.title}" with a focus timer`}
+        >
+          <PlayIcon className="h-[18px] w-[18px]" />
+        </button>
+      )}
 
       <button
         onClick={() => onDeleteTask(task)}

@@ -6,13 +6,16 @@ import { useAuth } from "@/lib/AuthContext";
 import { getTasks } from "@/lib/queries/tasks";
 import { getGoals } from "@/lib/queries/goals";
 import { getProjects } from "@/lib/queries/projects";
+import { getAssessments } from "@/lib/queries/assessments";
 import { getProfile } from "@/lib/queries/persona";
-import { sectionStatus } from "@/lib/persona/sections";
+import { quickStartDone, sectionStatus } from "@/lib/persona/sections";
+import { blockIntervals, scheduleInput } from "@/lib/schedule";
 import { useTaskActions } from "@/lib/useTaskActions";
 import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
-import AIPanel from "@/components/AIPanel";
-import CoachPanel from "@/components/CoachPanel";
-import SuggestionsCard from "@/components/SuggestionsCard";
+import FocusCard from "@/components/FocusCard";
+import RecoveryCard from "@/components/RecoveryCard";
+import DayCheckIn from "@/components/DayCheckIn";
+import FocusTimer from "@/components/FocusTimer";
 import TaskForm from "@/components/TaskForm";
 import WeekStrip from "@/components/WeekStrip";
 import WeeklyProgress from "@/components/WeeklyProgress";
@@ -20,19 +23,20 @@ import ProgressBar from "@/components/ProgressBar";
 import { getGoalProgress } from "@/lib/progress";
 import { TaskCard } from "@/components/TaskList";
 import { ErrorState, Modal, Skeleton } from "@/components/ui";
-import { BrainIcon, FolderIcon, PlusIcon, SparklesIcon, TargetIcon } from "@/components/icons";
+import { BrainIcon, PlusIcon, TargetIcon } from "@/components/icons";
 import {
   addDays,
   describeDue,
   getDayPart,
   getGreeting,
+  minutesToTime,
   toLocalDateString,
   type DayPart,
 } from "@/utils/date";
 import { isDone, isOpen, type Task } from "@/types/task";
 import type { Goal } from "@/types/goal";
-import type { Project } from "@/types/project";
-import { personaActive, SECTIONS, type Profile } from "@/types/persona";
+import type { Assessment, Project } from "@/types/project";
+import type { Profile } from "@/types/persona";
 
 const dayParts: { key: DayPart; label: string; icon: string; tint: string }[] = [
   { key: "morning", label: "Morning", icon: "☀️", tint: "bg-warn-soft" },
@@ -46,12 +50,18 @@ function byTime(a: Task, b: Task) {
   return (a.due_time ?? "99").localeCompare(b.due_time ?? "99");
 }
 
+const BANNER_KEY = "lifeos-persona-banner-hidden";
+
+// Today answers three questions, in order: what should I do now (Focus),
+// what's today (the timeline), and what's slipping (recovery). The week is
+// one compact card at the end.
 export default function DashboardPage() {
   const { user } = useAuth();
   const openQuickAdd = useQuickAdd();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -59,13 +69,22 @@ export default function DashboardPage() {
   const today = toLocalDateString(now);
   const [selectedDay, setSelectedDay] = useState(today);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [focusTask, setFocusTask] = useState<Task | null>(null);
+  const [bannerHidden, setBannerHidden] = useState(() => {
+    try {
+      return localStorage.getItem(BANNER_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const refresh = useCallback(() => {
-    Promise.all([getTasks(), getGoals(), getProjects()])
-      .then(([t, g, p]) => {
+    Promise.all([getTasks(), getGoals(), getProjects(), getAssessments().catch(() => [])])
+      .then(([t, g, p, a]) => {
         setTasks(t);
         setGoals(g);
         setProjects(p);
+        setAssessments(a);
         setLoadError("");
       })
       .catch((e: Error) => setLoadError(e.message))
@@ -89,28 +108,19 @@ export default function DashboardPage() {
   const { toggle, remove } = useTaskActions(setTasks, refresh);
 
   const isToday = selectedDay === today;
+  const aiProfile = profile?.ai_profile ?? null;
 
-  const dayTasks = useMemo(
-    () => tasks.filter((t) => t.due_date === selectedDay),
-    [tasks, selectedDay]
-  );
-
-  const overdue = useMemo(
-    () =>
-      isToday
-        ? tasks.filter((t) => isOpen(t) && t.due_date !== null && t.due_date < today)
-        : [],
-    [tasks, today, isToday]
-  );
+  const dayTasks = useMemo(() => tasks.filter((t) => t.due_date === selectedDay), [tasks, selectedDay]);
 
   const busyDays = useMemo(
-    () =>
-      new Set(
-        tasks
-          .filter((t) => isOpen(t) && t.due_date)
-          .map((t) => t.due_date!)
-      ),
+    () => new Set(tasks.filter((t) => isOpen(t) && t.due_date).map((t) => t.due_date!)),
     [tasks]
+  );
+
+  // Work / university hours of the day, shown in the timeline for context
+  const fixedBlocks = useMemo(
+    () => blockIntervals(scheduleInput(aiProfile, []), selectedDay),
+    [aiProfile, selectedDay]
   );
 
   const groups = useMemo(() => {
@@ -122,28 +132,29 @@ export default function DashboardPage() {
     return result;
   }, [dayTasks]);
 
-  // Project / goal deadlines in the next 7 days
+  // Project / exam / goal deadlines in the next 7 days
   const deadlines = useMemo(() => {
     const end = addDays(today, 7);
     const inRange = (d: string | null): d is string => !!d && d >= today && d <= end;
     return [
       ...projects
-        .filter((p) => inRange(p.deadline))
-        .map((p) => ({ id: p.id, name: p.name, date: p.deadline!, href: `/projects/${p.id}`, Icon: FolderIcon })),
+        .filter((p) => p.kind !== "milestone" && inRange(p.deadline))
+        .map((p) => ({ id: p.id, name: p.name, date: p.deadline!, href: `/projects/${p.id}` })),
+      ...assessments
+        .filter((a) => !a.done && inRange(a.due_date))
+        .map((a) => ({ id: a.id, name: a.title, date: a.due_date, href: `/projects/${a.project_id}` })),
       ...goals
         .filter((g) => inRange(g.target_date))
-        .map((g) => ({ id: g.id, name: g.name, date: g.target_date!, href: "/goals", Icon: TargetIcon })),
+        .map((g) => ({ id: g.id, name: g.name, date: g.target_date!, href: "/goals" })),
     ].sort((a, b) => a.date.localeCompare(b.date));
-  }, [projects, goals, today]);
+  }, [projects, goals, assessments, today]);
 
   const upcoming = useMemo(() => {
     const end = addDays(selectedDay, 7);
     return tasks
-      .filter((t) => isOpen(t) && t.due_date && t.due_date > selectedDay && t.due_date <= end)
+      .filter((t) => isOpen(t) && t.due_date && t.due_date > selectedDay && t.due_date <= end && !t.series_id)
       .sort(
-        (a, b) =>
-          a.due_date!.localeCompare(b.due_date!) ||
-          (a.due_time ?? "99").localeCompare(b.due_time ?? "99")
+        (a, b) => a.due_date!.localeCompare(b.due_date!) || (a.due_time ?? "99").localeCompare(b.due_time ?? "99")
       )
       .slice(0, 5);
   }, [tasks, selectedDay]);
@@ -151,18 +162,16 @@ export default function DashboardPage() {
   const goalProgress = useMemo(
     () =>
       goals
-        .map((goal) => ({ goal, progress: getGoalProgress(goal.id, tasks, projects) }))
-        .filter(({ progress }) => progress.total > 0 && progress.done < progress.total)
+        .map((goal) => ({ goal, progress: getGoalProgress(goal, tasks, projects) }))
+        .filter(({ progress }) => progress.manual || (progress.total > 0 && progress.done < progress.total))
         .slice(0, 3),
     [goals, tasks, projects]
   );
 
   const completed = dayTasks.filter(isDone).length;
-  const pending = dayTasks.filter(isOpen).length + overdue.length;
+  const counted = dayTasks.filter((t) => t.status !== "skipped").length;
   const name = profile?.display_name ?? user?.email?.split("@")[0] ?? "there";
-  const sectionsDone = profile
-    ? Object.values(sectionStatus(profile.ai_profile, projects, goals)).filter(Boolean).length
-    : SECTIONS.length;
+  const quickStart = profile ? quickStartDone(sectionStatus(profile.ai_profile, projects, goals)) : true;
   const [y, m, d] = selectedDay.split("-").map(Number);
   const selectedLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, {
     weekday: "long",
@@ -175,6 +184,7 @@ export default function DashboardPage() {
     onEditTask: setEditing,
     onDeleteTask: remove,
     onToggleStatus: toggle,
+    onStartTask: setFocusTask,
   };
 
   return (
@@ -186,31 +196,19 @@ export default function DashboardPage() {
         <p className="mt-0.5 text-muted">
           {selectedLabel}
           {!isToday && (
-            <button
-              onClick={() => setSelectedDay(today)}
-              className="ml-2 font-medium text-accent hover:underline"
-            >
+            <button onClick={() => setSelectedDay(today)} className="ml-2 font-medium text-accent hover:underline">
               Back to today
             </button>
           )}
         </p>
       </div>
 
-      <WeekStrip
-        selected={selectedDay}
-        today={today}
-        busyDays={busyDays}
-        onSelect={setSelectedDay}
-      />
+      <WeekStrip selected={selectedDay} today={today} busyDays={busyDays} onSelect={setSelectedDay} />
 
       {!loaded ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
-            <Skeleton className="h-20 rounded-2xl" />
-            <Skeleton className="h-20 rounded-2xl" />
-            <Skeleton className="h-20 rounded-2xl" />
-          </div>
           <Skeleton className="h-14 rounded-2xl" />
+          <Skeleton className="h-12 rounded-2xl" />
           <Skeleton className="h-20 rounded-2xl" />
           <Skeleton className="h-20 rounded-2xl" />
         </div>
@@ -218,77 +216,56 @@ export default function DashboardPage() {
         <ErrorState message={loadError} onRetry={refresh} />
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Tasks" value={dayTasks.length + overdue.length} className="text-ink" />
-            <Stat label="Completed" value={completed} className="text-ok" />
-            <Stat label="Pending" value={pending} className="text-warn" />
-          </div>
-
-          {dayTasks.length > 0 && (
-            <DayProgress
-              done={completed}
-              total={dayTasks.filter((t) => t.status !== "skipped").length}
-              label={isToday ? "Today's progress" : "Progress"}
-            />
-          )}
-
           {isToday && (
             <>
-              {profile && (!personaActive(profile) || sectionsDone < SECTIONS.length - 2) && (
-                <Link
-                  href="/onboarding"
-                  className="flex items-center gap-3 rounded-2xl bg-hero p-4 text-hero-ink shadow-card transition hover:brightness-110"
-                >
+              {profile && !quickStart && !bannerHidden && (
+                <div className="flex items-center gap-3 rounded-2xl bg-hero p-4 text-hero-ink shadow-card">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-grad-from to-grad-to text-white">
                     <BrainIcon className="h-5 w-5" />
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-semibold">
-                      {personaActive(profile) ? "Complete your AI Persona" : "Create your AI Persona"}
-                    </span>
+                  <Link href="/onboarding" className="min-w-0 flex-1">
+                    <span className="block font-semibold">Tell your AI about you · 1 min</span>
                     <span className="block text-sm opacity-75">
-                      {sectionsDone} of {SECTIONS.length} done · unlimited Persona AI
+                      Who you are, what you&apos;re working on, when you&apos;re busy. Plans get much better.
                     </span>
-                  </span>
-                  <span className="opacity-60">›</span>
-                </Link>
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setBannerHidden(true);
+                      try {
+                        localStorage.setItem(BANNER_KEY, "1");
+                      } catch {}
+                    }}
+                    className="shrink-0 text-sm opacity-60 hover:opacity-100"
+                    aria-label="Hide"
+                  >
+                    ✕
+                  </button>
+                </div>
               )}
-              <CoachPanel tasks={tasks} />
-              <SuggestionsCard
-                key={today}
+              <DayCheckIn
                 tasks={tasks}
-                profile={profile?.ai_profile ?? null}
                 today={today}
-                personaActive={personaActive(profile)}
+                hour={now.getHours()}
+                profile={aiProfile}
+                deadlines={deadlines}
               />
-              <AIPanel tasks={tasks} onToggle={toggle} personaActive={personaActive(profile)} />
-              <Link
-                href="/assistant"
-                className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                  <SparklesIcon className="h-[18px] w-[18px]" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold text-ink">Tell the AI what you want to do</span>
-                  <span className="block truncate text-sm text-muted">
-                    “Gym 3 days on, 1 off” · “Exam in 10 days” · “Move my tasks to tomorrow”
-                  </span>
-                </span>
-                <span className="text-muted">›</span>
-              </Link>
+              <FocusCard tasks={tasks} profile={aiProfile} />
+              <RecoveryCard
+                tasks={tasks}
+                today={today}
+                profile={aiProfile}
+                projects={projects}
+                assessments={assessments}
+              />
             </>
           )}
 
-          {overdue.length > 0 && (
-            <Group icon="⏰" label="Overdue" tint="bg-danger-soft">
-              {overdue.map((task) => (
-                <TaskCard key={task.id} task={task} {...cardProps} showDate />
-              ))}
-            </Group>
+          {counted > 0 && (
+            <DayProgress done={completed} total={counted} label={isToday ? "Today's progress" : "Progress"} />
           )}
 
-          {dayTasks.length === 0 && overdue.length === 0 ? (
+          {dayTasks.length === 0 ? (
             <div className="flex flex-col items-center rounded-2xl bg-surface px-6 py-10 text-center shadow-card">
               <p className="text-3xl">🎉</p>
               <p className="mt-2 font-semibold text-ink">
@@ -305,10 +282,24 @@ export default function DashboardPage() {
             </div>
           ) : (
             dayParts
-              .filter((part) => groups.has(part.key))
+              .filter((part) => groups.has(part.key) || fixedBlocks.some((b) => getDayPart(minutesToTime(b.start)) === part.key))
               .map((part) => (
                 <Group key={part.key} icon={part.icon} label={part.label} tint={part.tint}>
-                  {groups.get(part.key)!.map((task) => (
+                  {fixedBlocks
+                    .filter((b) => getDayPart(minutesToTime(b.start)) === part.key)
+                    .map((b) => (
+                      <li
+                        key={`${b.label}-${b.start}`}
+                        className="flex items-center gap-3 rounded-2xl border border-dashed border-line px-4 py-2.5 text-sm text-muted"
+                      >
+                        <span aria-hidden="true">🔒</span>
+                        <span className="flex-1">{b.label}</span>
+                        <span className="tabular-nums">
+                          {minutesToTime(b.start)}–{b.end >= 1440 ? "24:00" : minutesToTime(b.end)}
+                        </span>
+                      </li>
+                    ))}
+                  {(groups.get(part.key) ?? []).map((task) => (
                     <TaskCard key={task.id} task={task} {...cardProps} />
                   ))}
                 </Group>
@@ -333,66 +324,51 @@ export default function DashboardPage() {
             </Group>
           )}
 
-          <WeeklyProgress tasks={tasks} weekOf={selectedDay} today={today} />
-
-          <Link
-            href="/review"
-            className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
-          >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ok-soft text-lg">📊</span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-semibold text-ink">AI weekly review</span>
-              <span className="block truncate text-sm text-muted">
-                What you completed, what you missed, and what to focus on next
-              </span>
-            </span>
-            <span className="text-muted">›</span>
-          </Link>
-
-          {goalProgress.length > 0 && (
-            <section className="rounded-2xl bg-surface p-4 shadow-card sm:p-5">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="font-semibold text-ink">Goals</h2>
-                <Link href="/goals" className="text-sm text-accent hover:underline">
-                  All goals
-                </Link>
+          <WeeklyProgress tasks={tasks} weekOf={selectedDay} today={today}>
+            {deadlines.length > 0 && (
+              <div className="mt-4 border-t border-line pt-3">
+                <p className="mb-2 text-sm font-semibold text-ink">🏁 Deadlines</p>
+                <ul className="space-y-1.5">
+                  {deadlines.map((item) => (
+                    <li key={item.id}>
+                      <Link href={item.href} className="flex items-center gap-2 text-sm hover:text-accent">
+                        <span className="min-w-0 flex-1 truncate text-ink">{item.name}</span>
+                        <span className="text-muted">{describeDue(item.date, today).label}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="space-y-4">
-                {goalProgress.map(({ goal, progress }) => (
-                  <li key={goal.id}>
-                    <p className="mb-1.5 flex items-center gap-2 text-sm font-medium text-ink">
-                      <TargetIcon className="h-4 w-4 text-accent" />
-                      {goal.name}
-                    </p>
-                    <ProgressBar progress={progress} />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {deadlines.length > 0 && (
-            <Group icon="🏁" label="Deadlines this week" tint="bg-ok-soft">
-              {deadlines.map((item) => (
-                <li key={item.href + item.id}>
-                  <Link
-                    href={item.href}
-                    className="flex items-center gap-3 rounded-2xl bg-surface p-3.5 shadow-card transition hover:ring-2 hover:ring-accent/20"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                      <item.Icon className="h-[18px] w-[18px]" />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-semibold text-ink">
-                      {item.name}
-                    </span>
-                    <span className="text-sm text-muted">
-                      {describeDue(item.date, today).label}
-                    </span>
+            )}
+            {goalProgress.length > 0 && (
+              <div className="mt-4 border-t border-line pt-3">
+                <p className="mb-2 flex items-center justify-between text-sm font-semibold text-ink">
+                  <span>🎯 Goals</span>
+                  <Link href="/goals" className="font-normal text-accent hover:underline">
+                    All goals
                   </Link>
-                </li>
-              ))}
-            </Group>
-          )}
+                </p>
+                <ul className="space-y-3">
+                  {goalProgress.map(({ goal, progress }) => (
+                    <li key={goal.id}>
+                      <p className="mb-1 flex items-center gap-2 text-sm text-ink">
+                        <TargetIcon className="h-4 w-4 text-accent" />
+                        {goal.name}
+                      </p>
+                      <ProgressBar progress={progress} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Link
+              href="/review"
+              className="mt-4 flex items-center justify-between border-t border-line pt-3 text-sm font-medium text-accent hover:underline"
+            >
+              📊 Weekly review: what you finished, what slipped, what&apos;s next
+              <span>›</span>
+            </Link>
+          </WeeklyProgress>
         </>
       )}
 
@@ -408,23 +384,7 @@ export default function DashboardPage() {
           />
         )}
       </Modal>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: number;
-  className: string;
-}) {
-  return (
-    <div className="rounded-2xl bg-surface p-4 shadow-card">
-      <p className="text-sm text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums ${className}`}>{value}</p>
+      <FocusTimer key={focusTask?.id ?? "none"} task={focusTask} onClose={() => setFocusTask(null)} />
     </div>
   );
 }
@@ -473,9 +433,7 @@ function Group({
   return (
     <section>
       <h2 className="mb-3 flex items-center gap-2.5 text-lg font-semibold text-ink">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-full text-base ${tint}`}>
-          {icon}
-        </span>
+        <span className={`flex h-9 w-9 items-center justify-center rounded-full text-base ${tint}`}>{icon}</span>
         {label}
       </h2>
       <ul className="space-y-3">{children}</ul>

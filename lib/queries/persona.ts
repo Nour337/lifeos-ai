@@ -1,9 +1,12 @@
 import { supabase } from "@/lib/supabaseClient";
 import {
+  DEFAULT_NOTIFY,
   parseAIProfile,
+  parseNotify,
   parseStyle,
   type AIProfile,
   type AIStyle,
+  type NotifySettings,
   type OnboardingStatus,
   type Profile,
 } from "@/types/persona";
@@ -13,7 +16,7 @@ import {
 export async function getProfile(userId: string): Promise<Profile> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("display_name, ai_personality, ai_profile, onboarding_status")
+    .select("display_name, ai_personality, ai_profile, onboarding_status, timezone, notify")
     .eq("id", userId)
     .maybeSingle();
 
@@ -28,6 +31,8 @@ export async function getProfile(userId: string): Promise<Profile> {
     ai_personality: parseStyle(data?.ai_personality),
     ai_profile: parseAIProfile(data?.ai_profile),
     onboarding_status: (data?.onboarding_status as OnboardingStatus) ?? "pending",
+    timezone: data?.timezone || "UTC",
+    notify: data?.notify ? parseNotify(data.notify) : DEFAULT_NOTIFY,
   };
 }
 
@@ -38,6 +43,8 @@ export async function saveProfile(
     ai_personality: AIStyle;
     ai_profile: AIProfile;
     onboarding_status: OnboardingStatus;
+    timezone: string;
+    notify: NotifySettings;
   }>
 ): Promise<boolean> {
   const { error } = await supabase
@@ -66,10 +73,17 @@ export async function updateAIProfile(
   }
 }
 
-// "Ignore" on a suggestion teaches the AI to suggest that area less often.
-export function recordIgnored(userId: string, area: string) {
-  return updateAIProfile(userId, (p) => ({
-    ...p,
-    ignored: { ...p.ignored, [area]: (p.ignored[area] ?? 0) + 1 },
-  }));
+// "Ignore" on a suggestion teaches the AI to suggest that area less often
+// (the effect fades over a few weeks). Keyed by the project / goal id.
+export function recordIgnored(userId: string, areaId: string) {
+  return updateAIProfile(userId, (p) => {
+    const previous = p.ignored[areaId]?.count ?? 0;
+    return { ...p, ignored: { ...p.ignored, [areaId]: { count: previous + 1, last: new Date().toISOString() } } };
+  });
+}
+
+// The browser's timezone, saved once so the server knows the user's day
+export async function saveTimezone(userId: string, timezone: string): Promise<boolean> {
+  const { error } = await supabase.from("profiles").update({ timezone }).eq("id", userId);
+  return !error;
 }

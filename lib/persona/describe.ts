@@ -1,22 +1,37 @@
+import { describePattern } from "@/lib/assistant/patterns";
 import {
+  BUSINESS_STAGE_LABELS,
+  describeBlock,
   describeDays,
-  describePattern,
+  EMPLOYMENT_LABELS,
   IMPORTANCE_LABELS,
+  liveMemory,
   roleOf,
+  SKILL_STATUSES,
   styleOf,
   type Profile,
 } from "@/types/persona";
 import { kindOf } from "@/types/project";
 import type { Area, Insight } from "@/lib/persona/insights";
+import type { Series } from "@/types/task";
 
-// Turns the persona into compact text for AI prompts.
+// Turns the persona into compact text for AI prompts. Only what planning
+// needs is included (no age, no raw conversation).
 
-function areaLine(area: Area): string {
-  const kind = area.type === "goal" ? "Goal" : kindOf(area.kind as never).label;
+export function areaLine(area: Area): string {
+  const kind =
+    area.type === "goal"
+      ? area.daysLeft === null
+        ? "Goal"
+        : area.daysLeft <= 92
+          ? "Short-term goal"
+          : "Long-term goal"
+      : kindOf(area.kind as never).label;
   const parts: string[] = [];
+  if (area.role) parts.push(`${roleOf(area.role).label.toLowerCase()} area`);
   if (area.importance) parts.push(`importance ${IMPORTANCE_LABELS[area.importance].toLowerCase()}`);
   if (area.deadline) {
-    const label = area.kind === "course" ? "exam" : area.type === "goal" ? "target" : "deadline";
+    const label = area.deadlineLabel ?? "deadline";
     parts.push(
       area.daysLeft !== null && area.daysLeft < 0
         ? `${label} was ${area.deadline} (passed)`
@@ -31,8 +46,11 @@ function areaLine(area: Area): string {
       : `last session ${area.daysSinceLast === 0 ? "today" : `${area.daysSinceLast} days ago`}`
   );
   parts.push(`progress ${area.progress}%`);
-  parts.push(`${area.openTasks} open tasks, ${area.plannedNext7} planned in the next 7 days`);
-  if (area.ignored) parts.push(`user ignored ${area.ignored} suggestions for it`);
+  parts.push(`${area.openTasks} open tasks (${area.overdueTasks} overdue), ${area.plannedNext7} planned in the next 7 days`);
+  if (area.ignored >= 1) parts.push(`user ignored suggestions for it (weight ${area.ignored})`);
+  if (area.suggestionsAccepted) {
+    parts.push(`accepted ${area.suggestionsAccepted} suggestions, finished ${area.suggestionsDone}`);
+  }
   if (!area.aiHelp) parts.push("user does NOT want AI suggestions for it");
   return `${kind} "${area.name}": ${parts.join("; ")}`;
 }
@@ -41,24 +59,28 @@ export function describeAreas(areas: Area[], refPrefix = "a"): string {
   return areas.map((a, i) => `[${refPrefix}${i + 1}] ${areaLine(a)}`).join("\n") || "(none yet)";
 }
 
-export function describePersona(profile: Profile | null, insights: Insight[] = []): string {
+export function describeRoutines(series: Series[], today: string): string {
+  const active = series.filter((s) => s.is_routine && (!s.until || s.until >= today));
+  return active
+    .map(
+      (s) =>
+        `${s.title} (${describePattern(s.pattern)}${s.due_time ? ` at ${s.due_time.slice(0, 5)}` : ""}${
+          s.estimated_duration ? `, ${s.estimated_duration} min` : ""
+        })`
+    )
+    .join("; ");
+}
+
+export function describePersona(
+  profile: Profile | null,
+  insights: Insight[] = [],
+  series: Series[] = [],
+  today = new Date().toISOString().slice(0, 10)
+): string {
   if (!profile) return "No profile yet.";
   const p = profile.ai_profile;
   const lines: string[] = [];
-  const list = (items: (string | false | undefined)[]) => items.filter(Boolean).join(", ");
-  const education = list([
-    p.education.major && `studies ${p.education.major}`,
-    p.education.faculty && `faculty: ${p.education.faculty}`,
-    p.education.university && `at ${p.education.university}`,
-    p.education.term && `term/year: ${p.education.term}`,
-    p.education.graduation && `graduates ${p.education.graduation}`,
-  ]);
-  const work = list([
-    p.work.job && `works as ${p.work.job}`,
-    p.work.company && `at ${p.work.company}`,
-    p.work.hours && `work hours: ${p.work.hours}`,
-    p.work.responsibilities && `responsibilities: ${p.work.responsibilities}`,
-  ]);
+  const list = (items: (string | false | undefined | null)[]) => items.filter(Boolean).join(", ");
 
   if (profile.display_name) lines.push(`Name: ${profile.display_name}`);
   if (p.about.roles.length) {
@@ -70,40 +92,61 @@ export function describePersona(profile: Profile | null, insights: Insight[] = [
   } else if (p.about.headline) {
     lines.push(`About: ${p.about.headline}`);
   }
-  if (p.about.age_range) lines.push(`Age range: ${p.about.age_range}`);
+
+  const e = p.education;
+  const education = list([
+    e.major && `studies ${e.major}`,
+    e.faculty && `faculty: ${e.faculty}`,
+    e.university && `at ${e.university}`,
+    e.term && `term/year: ${e.term}`,
+    e.graduation && `graduates ${e.graduation}`,
+    (e.semester_start || e.semester_end) && `semester ${e.semester_start ?? "?"} to ${e.semester_end ?? "?"}`,
+    (e.exam_period_start || e.exam_period_end) &&
+      `exam period ${e.exam_period_start ?? "?"} to ${e.exam_period_end ?? "?"}`,
+  ]);
   if (education) lines.push(`Education: ${education}`);
+
+  const w = p.work;
+  const work = list([
+    w.job && `works as ${w.job}`,
+    w.company && `at ${w.company}`,
+    w.employment && EMPLOYMENT_LABELS[w.employment].toLowerCase(),
+    !!w.days_off?.length && `days off: ${describeDays(w.days_off)}`,
+    !!w.commute_minutes && `commute ${w.commute_minutes} min each way`,
+    w.responsibilities && `responsibilities: ${w.responsibilities}`,
+  ]);
   if (work) lines.push(`Work: ${work}`);
-  if (p.business.ideas.length || p.business.interests.length) {
+
+  if (p.business.ideas.length || p.business.interests.length || p.business.stage) {
     lines.push(
       `Business: ${list([
-        p.business.interests.length && `interested in ${p.business.interests.join(", ")}`,
-        p.business.ideas.length && `ideas: ${p.business.ideas.join("; ")}`,
-      ] as (string | false)[])}`
+        p.business.stage && `stage: ${BUSINESS_STAGE_LABELS[p.business.stage].toLowerCase()}`,
+        p.business.interests.length > 0 && `interested in ${p.business.interests.join(", ")}`,
+        p.business.ideas.length > 0 && `ideas: ${p.business.ideas.join("; ")}`,
+      ])}`
     );
   }
   if (p.summary.length) lines.push(`Summary: ${p.summary.join("; ")}`);
   if (p.interests.length) lines.push(`Interests: ${p.interests.join(", ")}`);
-  if (p.skills.length) lines.push(`Skills to develop: ${p.skills.join(", ")}`);
-  if (p.tools.length) lines.push(`Tools they want to learn: ${p.tools.join(", ")}`);
-  if (p.tech_stack.length) lines.push(`Technologies they use: ${p.tech_stack.join(", ")}`);
-  if (p.learning.length) lines.push(`Want to learn / take: ${p.learning.join(", ")}`);
+  for (const status of SKILL_STATUSES) {
+    const names = p.skills.filter((s) => s.status === status.value).map((s) => s.name);
+    if (names.length) lines.push(`Skills (${status.label.toLowerCase()}): ${names.join(", ")}`);
+  }
 
   const s = p.schedule;
   const schedule = [
     s.wake && `wakes ${s.wake}`,
     s.sleep && `sleeps ${s.sleep}`,
-    s.busy && `busy: ${s.busy}`,
-    s.free && `usually free: ${s.free}`,
     s.study_time && `prefers to study: ${s.study_time}`,
     s.project_time && `prefers project work: ${s.project_time}`,
-    s.daily_hours !== undefined && `realistic ${s.daily_hours}h/day for goals`,
+    s.daily_hours !== undefined && `realistic ${s.daily_hours}h/day of focused work (capacity)`,
+    s.rest_days?.length && `rest days (plan nothing): ${describeDays(s.rest_days)}`,
   ].filter(Boolean);
   if (schedule.length) lines.push(`Schedule: ${schedule.join("; ")}`);
-  const busy = p.blocks.length
-    ? p.blocks.map((b) => `${b.label} ${describeDays(b.days)} ${b.start}-${b.end}`)
-    : [s.busy, p.work.hours && `work ${p.work.hours}`].filter(Boolean);
-  if (busy.length) {
-    lines.push(`BUSY, never schedule anything during: ${busy.join("; ")} (check the weekday of every date)`);
+  if (p.blocks.length) {
+    lines.push(
+      `BUSY, never schedule anything during: ${p.blocks.map((b) => `${b.label} ${describeBlock(b)}`).join("; ")}`
+    );
   }
 
   const pr = p.preferences;
@@ -113,22 +156,29 @@ export function describePersona(profile: Profile | null, insights: Insight[] = [
     pr.tasks_per_day && `about ${pr.tasks_per_day} tasks/day`,
     pr.intensity && `schedule style: ${pr.intensity}`,
     pr.free_time && `wants free time: ${pr.free_time}`,
+    pr.durations &&
+      `default durations: ${Object.entries(pr.durations)
+        .map(([k, v]) => `${k} ${v} min`)
+        .join(", ")}`,
+    pr.language && `reply in ${pr.language}`,
+    pr.balance &&
+      `intended time split: ${Object.entries(pr.balance)
+        .map(([role, share]) => `${roleOf(role as never).label} ${share}%`)
+        .join(", ")}`,
   ].filter(Boolean);
   if (prefs.length) lines.push(`Preferences: ${prefs.join("; ")}`);
 
-  if (p.habits.length) {
+  const routines = describeRoutines(series, today);
+  if (routines) lines.push(`Routines (already on the calendar): ${routines}`);
+
+  const memory = liveMemory(p.memory, today);
+  if (memory.length) {
     lines.push(
-      `Recurring activities: ${p.habits
-        .map(
-          (h) =>
-            `${h.name} (${describePattern(h.pattern)}${h.time ? ` at ${h.time}` : ""}${
-              h.duration ? `, ${h.duration} min` : ""
-            })`
-        )
+      `Things to remember: ${memory
+        .map((m) => `${m.text}${m.expires_at ? ` (until ${m.expires_at})` : ""}`)
         .join("; ")}`
     );
   }
-  if (p.memory.length) lines.push(`Things to remember: ${p.memory.map((m) => m.text).join("; ")}`);
   if (insights.length) lines.push(`Learned from their activity: ${insights.map((i) => i.text).join(" ")}`);
   if (p.instructions) lines.push(`Their instructions for you: ${p.instructions}`);
 

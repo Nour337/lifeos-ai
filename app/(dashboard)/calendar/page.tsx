@@ -14,6 +14,9 @@ import {
 } from "@dnd-kit/core";
 import { useAuth } from "@/lib/AuthContext";
 import { getTasks, moveTask } from "@/lib/queries/tasks";
+import { getProfile } from "@/lib/queries/persona";
+import { blockIntervals, conflictsAt, loadOf, scheduleInput, taskMinutes } from "@/lib/schedule";
+import type { AIProfile } from "@/types/persona";
 import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import { useToast } from "@/components/Toast";
 import TaskForm from "@/components/TaskForm";
@@ -22,7 +25,7 @@ import WeekView from "@/components/calendar/WeekView";
 import DayView from "@/components/calendar/DayView";
 import { ChipContent, chipClass } from "@/components/calendar/TaskChip";
 import { ErrorState, Modal, Skeleton } from "@/components/ui";
-import { addDays, formatDate, getWeekDays, toLocalDateString } from "@/utils/date";
+import { addDays, formatDate, formatDuration, getWeekDays, minutesToTime, toLocalDateString } from "@/utils/date";
 import type { Task } from "@/types/task";
 
 type View = "day" | "week" | "month";
@@ -60,6 +63,7 @@ export default function CalendarPage() {
   const [loadError, setLoadError] = useState("");
   const [editing, setEditing] = useState<Task | null>(null);
   const [dragging, setDragging] = useState<Task | null>(null);
+  const [profile, setProfile] = useState<AIProfile | null>(null);
 
   const refresh = useCallback(() => {
     getTasks()
@@ -72,8 +76,15 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => {
-    if (user) refresh();
+    if (!user) return;
+    refresh();
+    getProfile(user.id)
+      .then((p) => setProfile(p.ai_profile))
+      .catch(() => {});
   }, [user, refresh]);
+
+  // Work / university hours, drawn behind the tasks
+  const busyFor = useCallback((date: string) => blockIntervals(scheduleInput(profile, []), date), [profile]);
 
   useTasksChanged(refresh);
 
@@ -128,9 +139,22 @@ export default function CalendarPage() {
       return;
     }
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...saved } : t)));
+
+    // Warn when it now overlaps busy time or overloads the day
+    const input = scheduleInput(profile, tasks.filter((t) => t.id !== task.id));
+    const start = time === undefined ? task.due_time?.slice(0, 5) ?? null : time;
+    const clash = start ? conflictsAt(input, date, start, taskMinutes(task), task.id)[0] : undefined;
+    const load = loadOf({ ...input, tasks: [...input.tasks, { ...task, ...saved } as Task] }, date);
+    const warning = clash
+      ? ` ⚠️ Overlaps ${clash.label} ${minutesToTime(clash.start)}–${clash.end >= 1440 ? "24:00" : minutesToTime(clash.end)}.`
+      : load.over && load.capacity > 0
+        ? ` ⚠️ That day now has ${formatDuration(load.planned)} for ~${formatDuration(load.capacity)} of realistic time.`
+        : "";
+
     toast(
-      `Moved “${task.title}” to ${formatDate(date)}${time ? ` at ${time}` : ""}`,
+      `Moved “${task.title}” to ${formatDate(date)}${time ? ` at ${time}` : ""}.${warning}`,
       {
+        tone: warning ? "error" : "default",
         action: {
           label: "Undo",
           onClick: async () => {
@@ -222,6 +246,7 @@ export default function CalendarPage() {
               anchor={anchor}
               today={today}
               tasksByDate={tasksByDate}
+              busyFor={busyFor}
               onOpenTask={setEditing}
               onOpenDay={openDay}
               onAdd={(date) => openQuickAdd({ dueDate: date })}
@@ -232,6 +257,7 @@ export default function CalendarPage() {
               date={anchor}
               isToday={anchor === today}
               tasks={tasksByDate.get(anchor) ?? []}
+              busy={busyFor(anchor)}
               onOpenTask={setEditing}
               onAdd={(date, time) => openQuickAdd({ dueDate: date, dueTime: time })}
             />

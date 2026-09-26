@@ -1,96 +1,112 @@
-import { AIError, consumeCredit, getUserSession } from "@/lib/ai/planDay";
-import { askAssistant, buildProposal, loadContext, savePersonaUpdate } from "@/lib/assistant/server";
-import { consumeExtraCredit, loadProfile } from "@/lib/persona/server";
-import { personaActive } from "@/types/persona";
-import type { AssistantResponse, ChatMessage } from "@/lib/assistant/types";
+import { buildContext } from "@/lib/assistant/context";
+import { addMessage, compactIfNeeded, getConversation, historyFor } from "@/lib/assistant/conversation";
+import { answerIntent } from "@/lib/assistant/intents";
+import { busyConflictFix, savePersonaUpdate } from "@/lib/assistant/persona-update";
+import { buildProposal, checkProposal } from "@/lib/assistant/proposal";
+import { askAssistant } from "@/lib/assistant/server";
+import type { AssistantResponse, Proposal, Remembered } from "@/lib/assistant/types";
+import { AIError, handle } from "@/lib/ai/server";
+import { metered } from "@/lib/ai/usage";
+import { loadPersona } from "@/lib/persona/server";
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_PATTERN = /^\d{2}:\d{2}$/;
 const MAX_MESSAGE_LENGTH = 2000;
 
+type Body = { message?: unknown; conversationId?: unknown; today?: unknown; localTime?: unknown };
+
+// Two sets of persona changes in one reply (facts from compaction + this turn)
+function combine(a: Remembered | null, b: Remembered | null): Remembered | null {
+  if (!a || !b) return a ?? b;
+  return {
+    changes: [...a.changes, ...b.changes].slice(0, 10),
+    undo: {
+      profile: { ...b.undo.profile, ...a.undo.profile }, // the earliest "before" wins
+      rows: [...a.undo.rows, ...b.undo.rows],
+    },
+  };
+}
+
+// New busy hours: tasks that now overlap them are moved in the same plan
+function withConflictFix(proposal: Proposal | null, fix: Proposal | null, input: Parameters<typeof checkProposal>[1]) {
+  if (!fix) return proposal;
+  if (!proposal) return fix;
+  const touched = new Set(proposal.updates.map((u) => u.taskId));
+  proposal.updates.push(...fix.updates.filter((u) => !touched.has(u.taskId)));
+  proposal.summary = `${proposal.summary} ${fix.summary}`;
+  checkProposal(proposal, input);
+  return proposal;
+}
+
 // POST /api/assistant
-//   { messages: ChatMessage[], today: "YYYY-MM-DD", localTime: "HH:MM" }
+//   { message: string, conversationId?: uuid, today?, localTime? }
 // Requires "Authorization: Bearer <supabase access token>".
-// mode "persona": unlimited Persona chat (needs a persona). Otherwise each
-// message uses one of the 10 daily AI messages. Nothing is written to the
-// database here: changes come back as a proposal the user approves.
+// The conversation is stored on the server. Simple requests are answered
+// from the data for free; everything else uses one AI point. Nothing is
+// written to the task list here: changes come back as a proposal the user
+// applies. Persona updates are saved right away (with undo).
 export async function POST(request: Request) {
-  const accessToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!accessToken) {
-    return Response.json({ error: "Not logged in." }, { status: 401 });
-  }
+  return handle<Body>(request, "Assistant", async (body, { supabase, userId }) => {
+    const content = typeof body.message === "string" ? body.message.trim().slice(0, MAX_MESSAGE_LENGTH) : "";
+    if (!content) return Response.json({ error: "Send a message first." }, { status: 400 });
 
-  let body: { messages?: unknown; today?: string; localTime?: string; mode?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid request body." }, { status: 400 });
-  }
+    const data = await loadPersona(supabase, userId, body);
+    const ctx = buildContext(supabase, data);
+    const conversation = await getConversation(supabase, userId, body.conversationId, content);
+    const userMessage = await addMessage(supabase, conversation, userId, { role: "user", content });
 
-  const messages: ChatMessage[] = (Array.isArray(body.messages) ? body.messages : [])
-    .filter(
-      (m): m is ChatMessage =>
-        !!m &&
-        (m.role === "user" || m.role === "assistant") &&
-        typeof m.content === "string" &&
-        m.content.trim().length > 0
-    )
-    .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_LENGTH) }));
+    // Answered from the data: no AI, no points
+    const intent = answerIntent(ctx, content);
+    if (intent) {
+      const message = await addMessage(supabase, conversation, userId, {
+        role: "assistant",
+        content: intent.reply,
+        proposal: intent.proposal,
+      });
+      return Response.json({
+        conversationId: conversation.id,
+        message,
+        userMessageId: userMessage.id,
+        free: true,
+      } satisfies AssistantResponse);
+    }
 
-  if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
-    return Response.json({ error: "Send a message first." }, { status: 400 });
-  }
+    const compacted = await compactIfNeeded(ctx, conversation);
+    const history = await historyFor(supabase, conversation);
 
-  // "today" and the time come from the browser so they match the user's timezone
-  const today =
-    body.today && DATE_PATTERN.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
-  const localTime =
-    body.localTime && TIME_PATTERN.test(body.localTime) ? body.localTime : "12:00";
-
-  try {
-    const { supabase, userId } = await getUserSession(accessToken);
-
-    // Persona chat is unlimited but needs a persona; normal chat uses one
-    // of the 10 daily AI messages and doesn't use the persona.
-    const personaMode = body.mode === "persona";
-    let remaining: number | undefined;
-    if (personaMode) {
-      if (!personaActive(await loadProfile(supabase, userId))) {
-        return Response.json(
-          { error: "Create your AI Persona first to use unlimited Persona AI." },
-          { status: 403 }
+    const { value, budget } = await metered(supabase, "chat", async (meter) => {
+      const { text, plan, personaUpdate } = await askAssistant(ctx, history, meter);
+      const remembered = personaUpdate ? await savePersonaUpdate(ctx, personaUpdate) : null;
+      let proposal = plan ? buildProposal(plan, ctx) : null;
+      if (remembered && "blocks" in remembered.undo.profile) {
+        proposal = withConflictFix(proposal, busyConflictFix(ctx), ctx.input);
+      }
+      if (!text && !proposal && !remembered) {
+        throw new AIError(
+          plan
+            ? "I couldn't turn that into tasks. Could you say it another way, with dates or days?"
+            : "Sorry, I didn't get that. Could you rephrase?",
+          502
         );
       }
-      await consumeExtraCredit(supabase, "persona");
-    } else {
-      remaining = await consumeCredit(supabase);
-    }
+      return { text, proposal, remembered };
+    });
 
-    const ctx = await loadContext(supabase, userId, today, localTime, personaMode);
-    const { text, args, personaUpdate } = await askAssistant(ctx, messages);
-    const proposal = args ? buildProposal(args, ctx) : null;
-    const remembered = personaUpdate ? await savePersonaUpdate(supabase, ctx, personaUpdate) : [];
-
+    const remembered = combine(compacted, value.remembered);
     const reply =
-      text ||
-      proposal?.summary ||
-      (remembered.length ? "Got it, I've updated your persona." : null) ||
-      (args
-        ? "I couldn't turn that into tasks. Could you say it another way, with dates or days?"
-        : "Sorry, I didn't get that. Could you rephrase?");
+      value.text ||
+      value.proposal?.summary ||
+      (remembered ? "Got it, I've updated what I know about you." : "Done.");
+    const message = await addMessage(supabase, conversation, userId, {
+      role: "assistant",
+      content: reply,
+      proposal: value.proposal,
+      remembered,
+    });
 
     return Response.json({
-      reply,
-      proposal,
-      remembered,
-      remaining,
-      persona: personaMode,
+      conversationId: conversation.id,
+      message,
+      userMessageId: userMessage.id,
+      budget,
     } satisfies AssistantResponse);
-  } catch (error) {
-    if (error instanceof AIError) {
-      return Response.json({ error: error.message }, { status: error.status });
-    }
-    console.error("Assistant route error:", error);
-    return Response.json({ error: "Something went wrong. Try again." }, { status: 500 });
-  }
+  });
 }

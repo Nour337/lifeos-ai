@@ -1,7 +1,7 @@
 import type { Progress } from "@/lib/progress";
 
 export default function ProgressBar({ progress }: { progress: Progress }) {
-  const complete = progress.total > 0 && progress.done === progress.total;
+  const complete = progress.manual ? progress.percent >= 100 : progress.total > 0 && progress.done === progress.total;
   return (
     <div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
@@ -13,7 +13,12 @@ export default function ProgressBar({ progress }: { progress: Progress }) {
         />
       </div>
       <p className="mt-1.5 flex justify-between text-xs text-muted">
-        {progress.total === 0 ? (
+        {progress.manual ? (
+          <>
+            <span>Your estimate</span>
+            <span className="font-medium text-ink">{progress.percent}%</span>
+          </>
+        ) : progress.total === 0 ? (
           <span>No tasks yet</span>
         ) : (
           <>

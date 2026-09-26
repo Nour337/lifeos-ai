@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import { AI_DAILY_LIMIT } from "@/lib/ai/limits";
+import { DEFAULT_DAILY_POINTS, type Budget } from "@/lib/ai/budget";
 
 // The profiles table stores extra user info; a missing row is normal for
 // accounts created before profiles existed, so fall back to null quietly.
@@ -34,21 +34,14 @@ export async function saveDisplayName(
   return true;
 }
 
-// How many AI questions are left today. The limit resets at midnight UTC,
-// matching current_date in consume_ai_credit().
-export async function getAICreditsLeft(userId: string): Promise<number | null> {
-  const utcToday = new Date().toISOString().slice(0, 10);
-  const { data, error } = await supabase
-    .from("ai_usage")
-    .select("count")
-    .eq("user_id", userId)
-    .eq("day", utcToday)
-    .maybeSingle();
-
+// Today's AI points (the day follows the user's timezone, like the server)
+export async function getAIBudget(): Promise<(Budget & { used: number; plan: string }) | null> {
+  const { data, error } = await supabase.rpc("get_ai_budget");
   if (error) {
-    console.error("Error fetching AI usage:", error.message);
+    console.error("Error fetching AI budget:", error.message);
     return null;
   }
-
-  return Math.max(0, AI_DAILY_LIMIT - (data?.count ?? 0));
+  const used = Number(data?.used ?? 0);
+  const limit = Number(data?.limit ?? DEFAULT_DAILY_POINTS);
+  return { used, limit, remaining: Math.max(0, limit - used), plan: String(data?.plan ?? "free") };
 }

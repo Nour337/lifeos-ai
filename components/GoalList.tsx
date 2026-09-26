@@ -4,6 +4,7 @@ import ProgressBar from "@/components/ProgressBar";
 import { CalendarIcon, FolderIcon, PencilIcon, TrashIcon } from "@/components/icons";
 import { formatDate } from "@/utils/date";
 import type { Goal } from "@/types/goal";
+import type { Project } from "@/types/project";
 import type { Progress } from "@/lib/progress";
 
 const emptyProgress: Progress = { done: 0, total: 0, percent: 0 };
@@ -12,12 +13,14 @@ export default function GoalList({
   goals,
   progressByGoal,
   projectCounts = {},
+  milestonesByGoal = {},
   onEditGoal,
   onDeleteGoal,
 }: {
   goals: Goal[];
   progressByGoal: Record<string, Progress>;
   projectCounts?: Record<string, number>;
+  milestonesByGoal?: Record<string, (Project & { done: boolean })[]>;
   onEditGoal: (goal: Goal) => void;
   onDeleteGoal: (id: string) => void;
 }) {
@@ -74,6 +77,18 @@ export default function GoalList({
                 {projectCount} {projectCount === 1 ? "project" : "projects"}
               </span>
             </div>
+
+            {(milestonesByGoal[goal.id] ?? []).length > 0 && (
+              <ol className="mt-3 space-y-1">
+                {milestonesByGoal[goal.id].map((m, i) => (
+                  <li key={m.id} className={`flex gap-2 text-sm ${m.done ? "text-muted line-through" : "text-ink"}`}>
+                    <span className="font-semibold text-accent">{i + 1}.</span>
+                    <span className="min-w-0 flex-1 truncate">🏁 {m.name}</span>
+                    {m.deadline && <span className="text-muted">{formatDate(m.deadline)}</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
 
             <div className="mt-4">
               <ProgressBar progress={progressByGoal[goal.id] ?? emptyProgress} />

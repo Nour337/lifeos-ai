@@ -8,7 +8,8 @@ import { getGoalById } from "@/lib/queries/goals";
 import { getTasksByProject } from "@/lib/queries/tasks";
 import { useTaskActions } from "@/lib/useTaskActions";
 import { useTasksChanged } from "@/lib/QuickAdd";
-import { computeProgress } from "@/lib/progress";
+import { getProjectProgress } from "@/lib/progress";
+import CourseExams from "@/components/CourseExams";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import ProgressBar from "@/components/ProgressBar";
@@ -139,7 +140,7 @@ export default function ProjectDetailPage() {
           {project.deadline && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-muted">
               <CalendarIcon className="h-4 w-4" />
-              Due {formatDate(project.deadline)}
+              {project.kind === "course" ? "Ends" : "Due"} {formatDate(project.deadline)}
             </span>
           )}
           {goal && (
@@ -153,9 +154,11 @@ export default function ProjectDetailPage() {
           )}
         </div>
         <div className="mt-5">
-          <ProgressBar progress={computeProgress(tasks)} />
+          <ProgressBar progress={getProjectProgress(project, tasks)} />
         </div>
       </Card>
+
+      {project.kind === "course" && <CourseExams course={project} />}
 
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-ink">

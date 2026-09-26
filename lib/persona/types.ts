@@ -1,10 +1,10 @@
-import type { TaskPriority } from "@/types/task";
+import type { Budget } from "@/lib/ai/budget";
+import type { Balance } from "@/lib/persona/insights";
+import type { TaskEnergy, TaskPriority } from "@/types/task";
 
 // Shapes shared by the coaching API (/api/coach) and the screens.
 
-// How a request was counted: Persona AI (unlimited) or one of the 10
-// daily AI messages
-export type Usage = { persona: true } | { persona: false; remaining: number };
+export type { Budget };
 
 export type Suggestion = {
   id: string;
@@ -14,9 +14,20 @@ export type Suggestion = {
   reason: string; // one line under the title
   why: string; // "Why am I seeing this?"
   priority: TaskPriority;
+  energy: TaskEnergy | null;
   projectId: string | null;
   goalId: string | null;
-  area: string | null; // project / goal name, used for "ignored" learning
+  areaId: string | null; // project / goal id, used for "ignored" learning
+  area: string | null; // its name
+  kind: "new" | "recover"; // recover = one of the user's own overdue tasks
+  taskId: string | null; // for "recover": the task to reschedule
+};
+
+export type SuggestionSet = {
+  day: string;
+  items: Suggestion[];
+  handled: string[];
+  recovery: boolean; // backlog is high: suggestions are about catching up
 };
 
 export type NowStep = {
@@ -55,7 +66,10 @@ export type WeeklyReview = {
     byKind: { label: string; count: number }[]; // "study sessions", "project sessions"...
     byArea: { name: string; count: number; minutes: number }[];
     missed: { title: string; date: string; area: string | null }[];
+    moved: number; // times tasks were postponed this week
+    routines: { title: string; done: number; total: number }[];
     progress: AreaProgress[];
+    balance?: Balance; // time per role vs. intended split
   };
   ai: {
     headline: string;

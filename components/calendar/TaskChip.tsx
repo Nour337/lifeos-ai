@@ -5,6 +5,7 @@ import { formatTime } from "@/utils/date";
 import { isOpen, type Task } from "@/types/task";
 
 export const chipColors: Record<string, string> = {
+  very_high: "border-l-danger bg-danger-soft",
   high: "border-l-danger bg-danger-soft",
   medium: "border-l-warn bg-warn-soft",
   low: "border-l-accent bg-accent-soft",
@@ -68,6 +69,8 @@ export function ChipContent({ task, compact }: { task: Task; compact?: boolean }
         {compact && task.due_time && (
           <span className="mr-1 hidden font-normal text-muted sm:inline">{formatTime(task.due_time)}</span>
         )}
+        {task.is_fixed && <span aria-label="Fixed">🔒 </span>}
+        {task.series_id && <span aria-label="Routine">🔁 </span>}
         {task.title}
       </span>
     </>

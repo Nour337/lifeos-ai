@@ -9,15 +9,18 @@ const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CHART_HEIGHT = 96; // px
 
 // Tasks completed per day this week: one series, one hue, bars grow from
-// the baseline. Hover or tap a bar for the exact numbers.
+// the baseline. Hover or tap a bar for the exact numbers. `children` adds
+// more of the week below the chart (deadlines, goals, the review).
 export default function WeeklyProgress({
   tasks,
   weekOf,
   today,
+  children,
 }: {
   tasks: Task[];
   weekOf: string;
   today: string;
+  children?: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const days = getWeekDays(weekOf).map((date) => {
@@ -104,6 +107,7 @@ export default function WeeklyProgress({
           ))}
         </tbody>
       </table>
+      {children}
     </section>
   );
 }

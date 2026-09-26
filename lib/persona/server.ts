@@ -1,53 +1,82 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { AIError, consumeCredit } from "@/lib/ai/planDay";
+import { AIError, userClock, type Clock } from "@/lib/ai/server";
 import { computeAreas, computeInsights, type Area, type Insight } from "@/lib/persona/insights";
+import { ensureOccurrences, toSeries } from "@/lib/series";
 import { addDays } from "@/utils/date";
 import {
+  DEFAULT_NOTIFY,
   parseAIProfile,
+  parseNotify,
   parseStyle,
-  personaActive,
   type OnboardingStatus,
   type Profile,
 } from "@/types/persona";
-import type { Usage } from "@/lib/persona/types";
 import type { Goal } from "@/types/goal";
-import type { Project } from "@/types/project";
-import type { Task } from "@/types/task";
+import type { Assessment, Project } from "@/types/project";
+import { normalizeTask, type Series, type Task, type TaskEvent } from "@/types/task";
 
+// Everything the AI may know about the user, loaded once per request with
+// the user's own client (row level security applies).
 export type PersonaData = {
+  clock: Clock;
   profile: Profile;
-  projects: Project[];
+  projects: Project[]; // includes milestones
   goals: Goal[];
+  assessments: Assessment[];
+  series: Series[];
   tasks: Task[]; // last 35 days, next 60 days, and undated open tasks
-  areas: Area[]; // same order as projects, then goals
+  events: TaskEvent[]; // last 35 days
+  areas: Area[]; // projects (without milestones), then goals
   insights: Insight[];
 };
+
+const PROFILE_COLUMNS = "display_name, ai_personality, ai_profile, onboarding_status, timezone, notify";
 
 export function toProfile(userId: string, row: Record<string, unknown> | null): Profile {
   return {
     id: userId,
-    display_name: typeof row?.display_name === "string" && row.display_name.trim() ? row.display_name.trim() : null,
+    display_name:
+      typeof row?.display_name === "string" && row.display_name.trim() ? row.display_name.trim() : null,
     ai_personality: parseStyle(row?.ai_personality),
     ai_profile: parseAIProfile(row?.ai_profile),
     onboarding_status: (["pending", "skipped", "done"].includes(row?.onboarding_status as string)
       ? row?.onboarding_status
       : "pending") as OnboardingStatus,
+    timezone: typeof row?.timezone === "string" && row.timezone ? row.timezone : "UTC",
+    notify: row?.notify ? parseNotify(row.notify) : DEFAULT_NOTIFY,
   };
+}
+
+export async function loadProfile(supabase: SupabaseClient, userId: string): Promise<Profile> {
+  const { data, error } = await supabase.from("profiles").select(PROFILE_COLUMNS).eq("id", userId).maybeSingle();
+  if (error) {
+    console.error("loadProfile failed:", error.message);
+    throw new AIError("Couldn't load your profile.", 500);
+  }
+  return toProfile(userId, data);
 }
 
 export async function loadPersona(
   supabase: SupabaseClient,
   userId: string,
-  today: string
+  fallbackClock?: { today?: unknown; localTime?: unknown },
+  options: { ensureSeries?: boolean } = {}
 ): Promise<PersonaData> {
-  const [profile, projects, goals, dated, undated] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("display_name, ai_personality, ai_profile, onboarding_status")
-      .eq("id", userId)
-      .maybeSingle(),
-    supabase.from("projects").select("*").order("created_at").limit(60),
-    supabase.from("goals").select("*").order("created_at").limit(40),
+  const profile = await loadProfile(supabase, userId);
+  const clock = userClock(profile.timezone, fallbackClock);
+  const today = clock.today;
+
+  // Routine occurrences must exist before the AI looks at the schedule
+  const seriesResult = await supabase.from("task_series").select("*").order("created_at");
+  const series = (seriesResult.data ?? []).map(toSeries).filter((s): s is Series => !!s);
+  if (options.ensureSeries !== false && series.length) {
+    await ensureOccurrences(supabase, today, series).catch(() => 0);
+  }
+
+  const [projects, goals, assessments, dated, undated, events] = await Promise.all([
+    supabase.from("projects").select("*").order("created_at").limit(100),
+    supabase.from("goals").select("*").order("created_at").limit(50),
+    supabase.from("assessments").select("*").gte("due_date", addDays(today, -35)).order("due_date").limit(100),
     supabase
       .from("tasks")
       .select("*")
@@ -55,82 +84,51 @@ export async function loadPersona(
       .gte("due_date", addDays(today, -35))
       .lte("due_date", addDays(today, 60))
       .order("due_date")
-      .limit(400),
+      .limit(500),
     supabase
       .from("tasks")
       .select("*")
       .is("parent_id", null)
       .is("due_date", null)
       .not("status", "in", "(done,skipped)")
-      .limit(60),
+      .limit(80),
+    supabase
+      .from("task_events")
+      .select("*")
+      .gte("created_at", new Date(Date.now() - 35 * 86_400_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(600),
   ]);
 
-  if (profile.error || projects.error || goals.error || dated.error || undated.error) {
-    console.error(
-      "loadPersona failed:",
-      profile.error?.message ?? projects.error?.message ?? goals.error?.message ?? dated.error?.message ?? undated.error?.message
-    );
-    throw new AIError("Couldn't load your profile.", 500);
+  const failed = [seriesResult, projects, goals, assessments, dated, undated, events].find((r) => r.error);
+  if (failed?.error) {
+    console.error("loadPersona failed:", failed.error.message);
+    throw new AIError("Couldn't load your data.", 500);
   }
 
-  const p = toProfile(userId, profile.data);
-  const tasks = [...(dated.data as Task[]), ...(undated.data as Task[])];
-  const projectList = projects.data as Project[];
-  const goalList = goals.data as Goal[];
+  const tasks = [...(dated.data ?? []), ...(undated.data ?? [])].map((t) => normalizeTask(t as Task));
+  const projectList = (projects.data ?? []) as Project[];
+  const goalList = (goals.data ?? []) as Goal[];
+  const assessmentList = (assessments.data ?? []) as Assessment[];
+  const eventList = (events.data ?? []) as TaskEvent[];
   return {
-    profile: p,
+    clock,
+    profile,
     projects: projectList,
     goals: goalList,
+    assessments: assessmentList,
+    series,
     tasks,
-    areas: computeAreas(projectList, goalList, tasks, today, p.ai_profile.ignored),
-    insights: computeInsights(tasks, today),
+    events: eventList,
+    areas: computeAreas(
+      projectList,
+      goalList,
+      tasks,
+      today,
+      profile.ai_profile.ignored,
+      assessmentList,
+      profile.timezone
+    ),
+    insights: computeInsights(tasks, today, eventList, profile.timezone),
   };
-}
-
-// Persona AI and onboarding don't use the 10 daily messages. Their
-// counters only enforce a high fair-use ceiling against abuse.
-export async function consumeExtraCredit(
-  supabase: SupabaseClient,
-  kind: "onboarding" | "persona"
-): Promise<number> {
-  const { data, error } = await supabase.rpc("consume_extra_ai_credit", { credit_kind: kind });
-  if (error) {
-    console.error("consume_extra_ai_credit failed:", error.message);
-    throw new AIError("Couldn't check your AI usage. Try again.", 500);
-  }
-  if (data === -1) {
-    throw new AIError(
-      "You've reached today's fair-use limit for Persona AI. It resets tomorrow.",
-      429
-    );
-  }
-  return data as number;
-}
-
-export type { Usage };
-
-// The core usage rule: with an active persona the request is unlimited
-// (Persona Mode); without one it uses one of the 10 daily AI messages.
-export async function consumeUsage(
-  supabase: SupabaseClient,
-  profile: Profile
-): Promise<Usage> {
-  if (personaActive(profile)) {
-    await consumeExtraCredit(supabase, "persona");
-    return { persona: true };
-  }
-  return { persona: false, remaining: await consumeCredit(supabase) };
-}
-
-export async function loadProfile(supabase: SupabaseClient, userId: string): Promise<Profile> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("display_name, ai_personality, ai_profile, onboarding_status")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) {
-    console.error("loadProfile failed:", error.message);
-    throw new AIError("Couldn't load your profile.", 500);
-  }
-  return toProfile(userId, data);
 }

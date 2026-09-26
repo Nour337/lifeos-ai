@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import TaskChip from "@/components/calendar/TaskChip";
 import { minutesToTime, timeToMinutes } from "@/utils/date";
+import type { Interval } from "@/lib/schedule";
 import type { Task } from "@/types/task";
 
 const HOUR_HEIGHT = 56; // px
@@ -62,12 +63,14 @@ export default function DayView({
   date,
   isToday,
   tasks,
+  busy = [],
   onOpenTask,
   onAdd,
 }: {
   date: string;
   isToday: boolean;
   tasks: Task[];
+  busy?: Interval[]; // work, university: shown as grey bands
   onOpenTask: (task: Task) => void;
   onAdd: (date: string, time?: string) => void;
 }) {
@@ -98,6 +101,19 @@ export default function DayView({
           {/* Half-hour drop targets; tapping an empty one adds a task there */}
           {Array.from({ length: (24 * 60) / SLOT_MINUTES }, (_, i) => (
             <Slot key={i} date={date} minutes={i * SLOT_MINUTES} onAdd={onAdd} />
+          ))}
+
+          {/* Fixed busy time (work, university) behind everything */}
+          {busy.map((b) => (
+            <div
+              key={`${b.label}-${b.start}`}
+              className="pointer-events-none absolute left-12 right-0 border-l-[3px] border-line bg-[repeating-linear-gradient(135deg,var(--surface-2),var(--surface-2)_6px,transparent_6px,transparent_12px)]"
+              style={{ top: (b.start / 60) * HOUR_HEIGHT, height: ((b.end - b.start) / 60) * HOUR_HEIGHT }}
+            >
+              <span className="ml-2 text-[11px] font-semibold text-muted">
+                🔒 {b.label} {minutesToTime(b.start)}–{b.end >= 1440 ? "24:00" : minutesToTime(b.end)}
+              </span>
+            </div>
           ))}
 
           {/* Hour labels */}

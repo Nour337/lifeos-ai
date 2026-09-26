@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { defaultChoice } from "@/lib/assistant/apply";
 import { Spinner } from "@/components/ui";
-import { CheckIcon, TargetIcon, TrashIcon } from "@/components/icons";
-import { formatDate } from "@/utils/date";
-import { statusLabels } from "@/types/task";
+import { CheckIcon, RepeatIcon, TargetIcon, TrashIcon } from "@/components/icons";
+import { formatDate, formatDuration } from "@/utils/date";
+import { priorityLabels, statusLabels } from "@/types/task";
 import type { ConflictChoice, DraftTask, Proposal } from "@/lib/assistant/types";
 
 export type ProposalState = "pending" | "applying" | "applied" | "discarded";
@@ -13,6 +13,7 @@ export type ProposalState = "pending" | "applying" | "applied" | "discarded";
 const COLLAPSED_DAYS = 5;
 
 const priorityDot: Record<string, string> = {
+  very_high: "bg-danger",
   high: "bg-danger",
   medium: "bg-warn",
   low: "bg-accent",
@@ -23,11 +24,13 @@ export default function ProposalCard({
   state,
   onApply,
   onDiscard,
+  onChangeAssumption,
 }: {
   proposal: Proposal;
   state: ProposalState;
   onApply: (choices: Record<string, ConflictChoice>) => void;
   onDiscard: () => void;
+  onChangeAssumption?: (assumption: string) => void; // "Instead of …" in the chat
 }) {
   const [choices, setChoices] = useState<Record<string, ConflictChoice>>({});
   const [expanded, setExpanded] = useState(false);
@@ -46,9 +49,16 @@ export default function ProposalCard({
   const conflicts = proposal.creates.filter((d) => d.conflict).length;
   const visibleDays = expanded ? byDay : byDay.slice(0, COLLAPSED_DAYS);
 
+  const series = proposal.series ?? [];
+  const seriesChanges = proposal.seriesChanges ?? [];
+  const assumptions = proposal.assumptions ?? [];
+  const overloaded = proposal.overloaded ?? [];
+
   const applyLabel = [
+    series.length && `${series.length} routine${series.length > 1 ? "s" : ""}`,
     proposal.creates.length && `add ${proposal.creates.length}`,
     proposal.updates.length && `change ${proposal.updates.length}`,
+    seriesChanges.length && `${seriesChanges.length} routine change${seriesChanges.length > 1 ? "s" : ""}`,
     proposal.deletes.length && `delete ${proposal.deletes.length}`,
   ]
     .filter(Boolean)
@@ -56,6 +66,36 @@ export default function ProposalCard({
 
   return (
     <div className="mt-2 overflow-hidden rounded-2xl bg-surface shadow-card">
+      {assumptions.length > 0 && (
+        <div className="border-b border-line px-4 py-3">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted">I assumed</p>
+          <div className="flex flex-wrap gap-1.5">
+            {assumptions.map((a) => (
+              <button
+                key={a}
+                type="button"
+                disabled={locked || !onChangeAssumption}
+                onClick={() => onChangeAssumption?.(a)}
+                title={onChangeAssumption ? "Tap to change this" : undefined}
+                className="rounded-full bg-surface-2 px-2.5 py-1 text-xs text-ink transition enabled:hover:bg-accent-soft enabled:hover:text-accent disabled:cursor-default"
+              >
+                {a}
+                {!locked && onChangeAssumption && <span className="ml-1 text-muted">✎</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {overloaded.length > 0 && (
+        <div className="border-b border-line bg-warn-soft/60 px-4 py-2.5 text-sm text-warn" role="status">
+          ⚠️ Over your daily capacity:{" "}
+          {overloaded
+            .map((o) => `${formatDate(o.date)} (${formatDuration(o.planned)} for ~${formatDuration(o.capacity)})`)
+            .join(", ")}
+        </div>
+      )}
+
       {proposal.newGoal && (
         <div className="border-b border-line bg-accent-soft/60 p-4">
           <p className="flex items-center gap-2 font-semibold text-ink">
@@ -76,6 +116,33 @@ export default function ProposalCard({
               ))}
             </ol>
           )}
+        </div>
+      )}
+
+      {series.length > 0 && (
+        <div className="border-b border-line p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            {series.some((x) => x.isRoutine) ? "Routines" : "Repeating tasks"} ({series.length})
+          </p>
+          <ul className="space-y-1.5">
+            {series.map((x) => (
+              <li key={x.key} className="flex items-start gap-2 text-sm">
+                <RepeatIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium text-ink">{x.title}</span>
+                  <span className="text-muted">
+                    {" "}
+                    · {x.patternLabel}
+                    {x.start ? ` at ${x.start}` : ""}
+                    {x.duration ? `, ${formatDuration(x.duration)}` : ""}
+                    {x.until ? ` · until ${formatDate(x.until)}` : " · ongoing"}
+                    {x.totalSessions ? ` · ${x.totalSessions} sessions` : ""}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">The first weeks are below; later sessions are added automatically.</p>
         </div>
       )}
 
@@ -124,6 +191,23 @@ export default function ProposalCard({
               <li key={u.taskId} className="text-sm">
                 <span className="font-medium text-ink">{u.title}</span>
                 <span className="text-muted"> · {describeChange(u)}</span>
+                {u.warning && <span className="block text-xs text-warn">⚠️ {u.warning}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {seriesChanges.length > 0 && (
+        <div className="border-t border-line p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
+            Routine changes ({seriesChanges.length})
+          </p>
+          <ul className="space-y-1">
+            {seriesChanges.map((c) => (
+              <li key={c.seriesId} className={`flex items-center gap-2 text-sm ${c.action === "stop" ? "text-danger" : "text-ink"}`}>
+                <RepeatIcon className="h-3.5 w-3.5 shrink-0" />
+                {c.label}
               </li>
             ))}
           </ul>
@@ -213,7 +297,7 @@ function DraftRow({
                 Move this to {c.suggestedStart}
               </Choice>
             )}
-            {c.suggestedStart && c.existingTaskId && (
+            {c.suggestedStart && c.existingTaskId && !c.existingFixed && (
               <Choice active={choice === "move_existing"} disabled={locked} onClick={() => onChoose("move_existing")}>
                 Move “{c.existingTitle}” to {c.suggestedStart}
               </Choice>
@@ -264,8 +348,9 @@ function describeChange(u: Proposal["updates"][number]): string {
     );
   }
   if (a.due_time) parts.push(`at ${a.due_time}${a.end_time ? `–${a.end_time}` : ""}`);
+  else if (a.due_time === null) parts.push("any time of day");
   if (a.status) parts.push(statusLabels[a.status]);
-  if (a.priority) parts.push(`${a.priority} priority`);
+  if (a.priority) parts.push(`${priorityLabels[a.priority].toLowerCase()} priority`);
   if (a.title) parts.push(`renamed to “${a.title}”`);
   return parts.join(", ") || "updated";
 }

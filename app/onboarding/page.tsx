@@ -7,7 +7,7 @@ import { getProfile, saveProfile } from "@/lib/queries/persona";
 import { getProjects } from "@/lib/queries/projects";
 import { getGoals } from "@/lib/queries/goals";
 import { sectionStatus } from "@/lib/persona/sections";
-import { nowFields, postAI, queueAssistantPrompt } from "@/lib/persona/client";
+import { postAI, queueAssistantPrompt } from "@/lib/persona/client";
 import type { OnboardingResponse, OnboardingWidget } from "@/lib/persona/onboarding";
 import { SparklesIcon } from "@/components/icons";
 import { AI_STYLES, INTEREST_OPTIONS, SECTIONS, type AIStyle, type SectionKey } from "@/types/persona";
@@ -46,9 +46,9 @@ function intro(mode: Mode, name: string | null): Message {
     content: [
       `Hey${name ? ` ${name}` : ""} 👋`,
       "",
-      "I'm your new AI planner. Let's create your AI Persona: who you are, what you're doing and what you want. After that, your Persona AI is unlimited.",
+      "I'm your new AI planner. A quick start first: who you are, what you're working on, and when you're busy. Everything else I'll learn as we go.",
       "",
-      "It takes about 3 minutes, and you can skip anything.",
+      "It takes about a minute, and you can skip anything.",
       "",
       name
         ? "What are you doing these days? Pick everything that fits: you can be a student and working at the same time."
@@ -137,7 +137,6 @@ export default function OnboardingPage() {
           messages: next
             .filter((m): m is Message & { role: "user" | "assistant" } => m.role !== "error")
             .map((m): ChatMessage => ({ role: m.role, content: m.content })),
-          today: nowFields().today,
           mode,
         });
         setSections(data.sections);
@@ -187,7 +186,13 @@ export default function OnboardingPage() {
     router.replace(to);
   };
 
-  const doneCount = Object.values(sections).filter(Boolean).length;
+  // The quick start: who you are, what you're working on, when you're busy
+  const steps = [
+    { label: "About you", done: sections.about },
+    { label: "What you're working on", done: sections.education || sections.work || sections.goals },
+    { label: "When you're busy", done: sections.schedule },
+  ];
+  const doneCount = steps.filter((s) => s.done).length;
   const last = messages[messages.length - 1];
   const showControls = last?.role === "assistant" && !sending;
 
@@ -210,11 +215,11 @@ export default function OnboardingPage() {
         {mode === "onboarding" && (
           <div className="mt-3">
             <div className="flex gap-1.5" aria-hidden="true">
-              {SECTIONS.map((s) => (
+              {steps.map((s) => (
                 <span
-                  key={s.key}
+                  key={s.label}
                   className={`h-1.5 flex-1 rounded-full transition-colors duration-500 ${
-                    sections[s.key] ? "bg-gradient-to-r from-grad-from to-grad-to" : "bg-line"
+                    s.done ? "bg-gradient-to-r from-grad-from to-grad-to" : "bg-line"
                   }`}
                 />
               ))}
@@ -222,9 +227,7 @@ export default function OnboardingPage() {
             <p className="mt-1.5 text-xs text-muted">
               {finished
                 ? "All set 🎉"
-                : `Creating your AI Persona · ${doneCount} of ${SECTIONS.length}: ${SECTIONS.filter((s) => sections[s.key])
-                    .map((s) => s.emoji)
-                    .join(" ")}`}
+                : `Quick start · ${doneCount} of ${steps.length}${doneCount < steps.length ? ` · next: ${steps.find((s) => !s.done)?.label.toLowerCase()}` : ""}`}
             </p>
           </div>
         )}

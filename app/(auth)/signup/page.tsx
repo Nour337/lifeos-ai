@@ -70,8 +70,8 @@ export default function SignupPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
-                placeholder="At least 6 characters"
+                minLength={8}
+                placeholder="At least 8 characters"
               />
             )}
           </Field>
@@ -86,6 +86,13 @@ export default function SignupPage() {
             {submitting && <Spinner />}
             {submitting ? "Creating account..." : "Create account"}
           </Button>
+          <p className="text-center text-xs text-muted">
+            By creating an account you agree to how we handle your data:{" "}
+            <a href="/privacy" className="text-accent hover:underline">
+              privacy
+            </a>
+            .
+          </p>
         </form>
       )}
     </AuthCard>

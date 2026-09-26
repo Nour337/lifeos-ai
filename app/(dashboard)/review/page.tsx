@@ -4,12 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
-import { nowFields, postAI, queueAssistantPrompt } from "@/lib/persona/client";
+import { postAI, queueAssistantPrompt } from "@/lib/persona/client";
 import { useToast } from "@/components/Toast";
 import { ErrorState, Skeleton, Spinner } from "@/components/ui";
 import { SparklesIcon } from "@/components/icons";
 import { addDays, formatDate, formatDuration, getWeekDays, toLocalDateString } from "@/utils/date";
 import type { AreaProgress, WeeklyReview } from "@/lib/persona/types";
+import { roleOf } from "@/types/persona";
 
 type Which = "last" | "this";
 
@@ -37,11 +38,7 @@ export default function ReviewPage() {
       setGenerating(true);
       setError("");
       try {
-        const data = await postAI<{ review: WeeklyReview }>(session, "/api/coach", {
-          mode: "review",
-          ...nowFields(),
-          weekStart: start,
-        });
+        const data = await postAI<{ review: WeeklyReview }>(session, "/api/coach", { mode: "review", weekStart: start });
         setReviews((prev) => ({ ...prev, [start]: data.review }));
       } catch (e) {
         setError((e as Error).message);
@@ -77,7 +74,7 @@ export default function ReviewPage() {
   const saveProgress = async (area: AreaProgress, value: number) => {
     const { error: saveError } = await supabase
       .from(area.type === "project" ? "projects" : "goals")
-      .update({ progress: value })
+      .update({ progress: value, progress_manual: true })
       .eq("id", area.id);
     if (saveError) {
       toast("Couldn't save progress.", { tone: "error" });
@@ -157,7 +154,7 @@ export default function ReviewPage() {
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-grad-from to-grad-to font-semibold text-white shadow-lg shadow-accent/30"
           >
             <SparklesIcon className="h-5 w-5" />
-            Create my weekly review
+            Create my weekly review · 2 points
           </button>
         )
       ) : (
@@ -173,6 +170,11 @@ export default function ReviewPage() {
               <Stat value={formatDuration(review.stats.minutes || 0) || "0m"} label="focused" />
               <Stat value={`${review.stats.missed.length}`} label="missed" />
             </div>
+            {(review.stats.moved ?? 0) > 0 && (
+              <p className="mt-3 text-center text-sm opacity-75">
+                Postponed {review.stats.moved} time{review.stats.moved > 1 ? "s" : ""} this week
+              </p>
+            )}
           </section>
 
           {review.stats.byKind.length > 0 && (
@@ -204,6 +206,52 @@ export default function ReviewPage() {
                   })}
                 </ul>
               )}
+            </Card>
+          )}
+
+          {review.stats.balance && review.stats.balance.length > 0 && (
+            <Card title="Life balance" emoji="⚖️">
+              <p className="mb-3 text-sm text-muted">Where your finished work went, by role{review.stats.balance.some((b) => b.target !== null) ? ", against the split you want" : ""}.</p>
+              <ul className="space-y-3">
+                {review.stats.balance.map((b) => (
+                  <li key={b.role}>
+                    <div className="mb-1 flex justify-between gap-2 text-sm">
+                      <span className="text-ink">
+                        {roleOf(b.role).emoji} {roleOf(b.role).label}
+                      </span>
+                      <span className="text-muted">
+                        {b.share}% · {formatDuration(b.minutes || 0)}
+                        {b.target !== null && (
+                          <span className={Math.abs(b.share - b.target) > 15 ? "ml-1 font-semibold text-warn" : "ml-1"}>
+                            (want {b.target}%)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="relative h-2 overflow-hidden rounded-full bg-surface-2">
+                      <div className="h-full rounded-full bg-accent" style={{ width: `${b.share}%` }} />
+                      {b.target !== null && (
+                        <span className="absolute top-0 h-full w-0.5 bg-ink" style={{ left: `${b.target}%` }} aria-hidden="true" />
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {(review.stats.routines ?? []).length > 0 && (
+            <Card title="Routines" emoji="🔁">
+              <ul className="space-y-1.5">
+                {review.stats.routines.map((r) => (
+                  <li key={r.title} className="flex justify-between gap-3 text-sm">
+                    <span className="truncate text-ink">{r.title}</span>
+                    <span className={`shrink-0 font-medium ${r.done === r.total ? "text-ok" : "text-muted"}`}>
+                      {r.done} of {r.total}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
 
@@ -271,7 +319,7 @@ export default function ReviewPage() {
               className="flex items-center gap-1 font-medium text-accent hover:underline disabled:opacity-50"
             >
               {generating && <Spinner className="h-3 w-3" />}
-              Refresh
+              Refresh · 2 points
             </button>
           </div>
           {error && <p className="rounded-xl bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}

@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import { QuickAddProvider, useQuickAdd } from "@/lib/QuickAdd";
-import { getProfile } from "@/lib/queries/persona";
+import { notifyTasksChanged, QuickAddProvider, useQuickAdd } from "@/lib/QuickAdd";
+import { getProfile, saveTimezone } from "@/lib/queries/persona";
+import { ensureOccurrencesOnce } from "@/lib/series";
+import { supabase } from "@/lib/supabaseClient";
+import { browserTimeZone, toLocalDateString } from "@/utils/date";
+import type { NotifySettings } from "@/types/persona";
+import LocalReminders from "@/components/LocalReminders";
 import { Button, Spinner } from "@/components/ui";
 import {
   CalendarIcon,
@@ -41,8 +46,9 @@ export default function DashboardLayout({
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
-  // First-time users meet their AI before the dashboard
+  // First-time users meet their AI (a one-minute quick start) first
   const [checkedUser, setCheckedUser] = useState<string | null>(null);
+  const [notify, setNotify] = useState<NotifySettings | null>(null);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -56,6 +62,12 @@ export default function DashboardLayout({
     getProfile(user.id)
       .then((profile) => {
         if (cancelled) return;
+        // The server works out "today" from this, so keep it current
+        const zone = browserTimeZone();
+        if (zone !== profile.timezone) saveTimezone(user.id, zone);
+        setNotify(profile.notify);
+        // Routine sessions for the coming weeks (once a day)
+        ensureOccurrencesOnce(supabase, toLocalDateString()).then((created) => created && notifyTasksChanged());
         if (profile.onboarding_status === "pending") router.replace("/onboarding");
         else setCheckedUser(user.id);
       })
@@ -76,6 +88,7 @@ export default function DashboardLayout({
 
   return (
     <QuickAddProvider>
+      <LocalReminders notify={notify} />
       <AppShell>{children}</AppShell>
     </QuickAddProvider>
   );

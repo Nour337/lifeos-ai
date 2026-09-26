@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
 import { getGoals } from "@/lib/queries/goals";
 import { Button, Field, Input, Select, Textarea } from "@/components/ui";
-import { PROJECT_KINDS, type Project, type ProjectKind } from "@/types/project";
+import { PICKABLE_KINDS, PROJECT_KINDS, type Project, type ProjectKind } from "@/types/project";
 import {
   DIFFICULTY_LABELS,
   IMPORTANCE_LABELS,
@@ -42,6 +42,8 @@ export default function ProjectForm({
     editingProject?.weekly_hours != null ? String(editingProject.weekly_hours) : ""
   );
   const [progress, setProgress] = useState(editingProject?.progress ?? 0);
+  // Off = calculated from the project's tasks
+  const [manual, setManual] = useState(editingProject?.progress_manual ?? false);
   const [aiHelp, setAiHelp] = useState(editingProject?.ai_help ?? true);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [saving, setSaving] = useState(false);
@@ -72,7 +74,8 @@ export default function ProjectForm({
       importance: importance || null,
       difficulty: isCourse ? difficulty || null : null,
       weekly_hours: weeklyHours && Number.isFinite(hours) ? Math.min(Math.max(hours, 0), 100) : null,
-      progress,
+      progress: manual ? progress : 0,
+      progress_manual: manual,
       ai_help: aiHelp,
     };
 
@@ -101,7 +104,7 @@ export default function ProjectForm({
         <Field label="Type">
           {(id) => (
             <Select id={id} value={kind} onChange={(e) => setKind(e.target.value as ProjectKind)}>
-              {PROJECT_KINDS.map((k) => (
+              {(kind === "milestone" ? PROJECT_KINDS : PICKABLE_KINDS).map((k) => (
                 <option key={k.value} value={k.value}>
                   {k.emoji} {k.label}
                 </option>
@@ -150,7 +153,7 @@ export default function ProjectForm({
         )}
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label={isCourse ? "Exam date" : "Deadline"}>
+        <Field label={isCourse ? "Course ends" : "Deadline"}>
           {(id) => (
             <Input
               id={id}
@@ -212,20 +215,32 @@ export default function ProjectForm({
           )}
         </Field>
       </div>
-      <Field label={`How far along are you? ${progress}%`}>
-        {(id) => (
+      {isCourse && <p className="-mt-2 text-xs text-muted">Exams, quizzes and assignments are added on the course page.</p>}
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-ink">
           <input
-            id={id}
+            type="checkbox"
+            checked={manual}
+            onChange={(e) => setManual(e.target.checked)}
+            className="h-4 w-4 accent-[var(--accent)]"
+          />
+          Set progress by hand{manual ? `: ${progress}%` : ""}
+        </label>
+        {manual ? (
+          <input
             type="range"
             min={0}
             max={100}
             step={5}
             value={progress}
             onChange={(e) => setProgress(Number(e.target.value))}
-            className="w-full accent-[var(--accent)]"
+            className="mt-2 w-full accent-[var(--accent)]"
+            aria-label="Progress"
           />
+        ) : (
+          <p className="mt-1 text-xs text-muted">Calculated from its tasks.</p>
         )}
-      </Field>
+      </div>
       <label className="flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2.5 text-sm text-ink">
         <input
           type="checkbox"

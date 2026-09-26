@@ -29,7 +29,8 @@ export default function ProjectsPage() {
   const refreshProjects = useCallback(() => {
     Promise.all([getProjects(), getTasks(), getGoals()])
       .then(([projectData, taskData, goalData]) => {
-        setProjects(projectData);
+        // Milestones are shown under their goal
+        setProjects(projectData.filter((p) => p.kind !== "milestone"));
         setTasks(taskData);
         setGoalNames(Object.fromEntries(goalData.map((g) => [g.id, g.name])));
         setLoadError("");
@@ -45,7 +46,7 @@ export default function ProjectsPage() {
   const progressByProject = useMemo(() => {
     const result: Record<string, Progress> = {};
     for (const project of projects) {
-      result[project.id] = getProjectProgress(project.id, tasks);
+      result[project.id] = getProjectProgress(project, tasks);
     }
     return result;
   }, [projects, tasks]);

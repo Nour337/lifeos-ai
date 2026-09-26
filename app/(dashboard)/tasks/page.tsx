@@ -9,6 +9,7 @@ import { useQuickAdd, useTasksChanged } from "@/lib/QuickAdd";
 import TaskList from "@/components/TaskList";
 import TaskForm from "@/components/TaskForm";
 import TaskFilters, { type TaskFilterState } from "@/components/TaskFilters";
+import FocusTimer from "@/components/FocusTimer";
 import {
   Button,
   EmptyState,
@@ -18,6 +19,7 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { ChecklistIcon, PlusIcon, SearchIcon } from "@/components/icons";
+import { addDays, toLocalDateString } from "@/utils/date";
 import { isOpen, type Task } from "@/types/task";
 
 // Open tasks first, then by due date (undated last), newest first as tiebreak
@@ -38,6 +40,7 @@ export default function TasksPage() {
   const openQuickAdd = useQuickAdd();
   // null = closed, otherwise the task being edited (new tasks use the "+" button)
   const [editing, setEditing] = useState<Task | null>(null);
+  const [focusTask, setFocusTask] = useState<Task | null>(null);
   const [filters, setFilters] = useState<TaskFilterState>({
     status: "all",
     priority: "all",
@@ -46,9 +49,11 @@ export default function TasksPage() {
   });
 
   const refreshTasks = useCallback(() => {
-    getTasks()
+    getTasks({ all: true })
       .then((data) => {
-        setTasks(data);
+        // Routine sessions are listed until tomorrow; later ones are on the Calendar
+        const horizon = addDays(toLocalDateString(), 1);
+        setTasks(data.filter((t) => !t.series_id || (t.due_date ?? "") <= horizon));
         setLoadError("");
       })
       .catch((e: Error) => setLoadError(e.message))
@@ -140,8 +145,10 @@ export default function TasksPage() {
           onEditTask={setEditing}
           onDeleteTask={remove}
           onToggleStatus={toggle}
+          onStartTask={setFocusTask}
         />
       )}
+      <FocusTimer key={focusTask?.id ?? "none"} task={focusTask} onClose={() => setFocusTask(null)} />
 
       <Modal open={editing !== null} title="Edit task" onClose={closeForm}>
         {editing && (

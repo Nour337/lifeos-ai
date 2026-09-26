@@ -3,59 +3,36 @@
 import { useCallback } from "react";
 import { useToast } from "@/components/Toast";
 import { getSubtasks } from "@/lib/queries/subtasks";
-import {
-  deleteTask,
-  restoreTask,
-  setTaskDueDate,
-  toggleTaskStatus,
-} from "@/lib/queries/tasks";
-import { describeDue, toLocalDateString } from "@/utils/date";
-import { isOpen, type Task } from "@/types/task";
+import { deleteTask, restoreTask, setTaskStatus, toggleTaskStatus } from "@/lib/queries/tasks";
+import type { Task, TaskStatus } from "@/types/task";
 
-// Tick / delete with instant UI updates, error messages, and Undo.
-// Shared by every screen that shows tasks.
+// Tick / skip / delete with instant UI updates, error messages, and Undo.
+// Shared by every screen that shows tasks. Routine sessions are ordinary
+// tasks: ticking one records it done; deleting one skips that day.
 export function useTaskActions(
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>,
   refresh: () => void
 ) {
   const toast = useToast();
 
-  const toggle = useCallback(
-    async (task: Task) => {
-      const isRepeatCompletion = task.repeat && isOpen(task);
-      if (!isRepeatCompletion) {
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === task.id
-              ? { ...t, status: task.status === "done" ? "todo" : "done" }
-              : t
-          )
-        );
-      }
-
-      const result = await toggleTaskStatus(task);
-      if (!result.ok) {
+  const setStatus = useCallback(
+    async (task: Task, status: TaskStatus) => {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status } : t)));
+      if (!(await setTaskStatus(task.id, status))) {
         toast("Couldn't update the task. Try again.", { tone: "error" });
         refresh();
-        return;
       }
+    },
+    [setTasks, refresh, toast]
+  );
 
-      if (result.movedTo) {
-        const next = describeDue(result.movedTo, toLocalDateString()).label;
-        setTasks((prev) =>
-          prev.map((t) => (t.id === task.id ? { ...t, due_date: result.movedTo! } : t))
-        );
-        toast(`Done! Next one: ${next}`, {
-          action: {
-            label: "Undo",
-            onClick: async () => {
-              if (!(await setTaskDueDate(task.id, result.previousDueDate ?? null))) {
-                toast("Couldn't undo. Try again.", { tone: "error" });
-              }
-              refresh();
-            },
-          },
-        });
+  const toggle = useCallback(
+    async (task: Task) => {
+      const status: TaskStatus = task.status === "done" ? "todo" : "done";
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status } : t)));
+      if (!(await toggleTaskStatus(task))) {
+        toast("Couldn't update the task. Try again.", { tone: "error" });
+        refresh();
       }
     },
     [setTasks, refresh, toast]
@@ -74,7 +51,7 @@ export function useTaskActions(
         return;
       }
 
-      toast("Task deleted", {
+      toast(task.series_id ? "Session removed (the routine continues)" : "Task deleted", {
         action: {
           label: "Undo",
           onClick: async () => {
@@ -92,5 +69,5 @@ export function useTaskActions(
     [setTasks, refresh, toast]
   );
 
-  return { toggle, remove };
+  return { toggle, remove, setStatus };
 }
