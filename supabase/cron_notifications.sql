@@ -12,13 +12,15 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
 select cron.unschedule('lifeos-notify') where exists (select 1 from cron.job where jobname = 'lifeos-notify');
+-- (the secret is read from private.settings, so it isn't copied into the job)
 select cron.schedule(
   'lifeos-notify',
   '*/5 * * * *',
   $$
   select net.http_get(
     url := 'https://<YOUR-APP-DOMAIN>/api/cron/notify',
-    headers := jsonb_build_object('Authorization', 'Bearer <CRON_SECRET>')
+    headers := jsonb_build_object('Authorization',
+      'Bearer ' || (select value from private.settings where key = 'cron_secret'))
   );
   $$
 );
